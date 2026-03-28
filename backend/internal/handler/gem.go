@@ -15,7 +15,7 @@ func (h *Handler) EarnGems(c echo.Context) error {
 
 	resp, err := h.svc.EarnGems(c.Request().Context(), req)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return mapServiceError(c, err)
 	}
 
 	return c.JSON(http.StatusOK, resp)

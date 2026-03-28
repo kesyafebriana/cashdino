@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -23,6 +24,7 @@ type mockRepo struct {
 	getLastCheckin         func(ctx context.Context, userID string) (*model.UserDailyCheckin, error)
 	getCheckinDate         func(ctx context.Context, checkinID string) (time.Time, error)
 	insertUserDailyCheckin func(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error
+	runInTx                func(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 func (m *mockRepo) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
@@ -54,6 +56,12 @@ func (m *mockRepo) GetCheckinDate(ctx context.Context, checkinID string) (time.T
 }
 func (m *mockRepo) InsertUserDailyCheckin(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error {
 	return m.insertUserDailyCheckin(ctx, userID, checkinID, gemsEarned, currentStreak)
+}
+func (m *mockRepo) RunInTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if m.runInTx != nil {
+		return m.runInTx(ctx, fn)
+	}
+	return fn(ctx)
 }
 
 // --- Helpers ---
@@ -127,7 +135,7 @@ func TestEarnGems_ValidGameplay_ReturnsWeeklyGems(t *testing.T) {
 	assert.Equal(t, 1500, resp.WeeklyGems)
 }
 
-func TestEarnGems_EmptyUserID_ReturnsError(t *testing.T) {
+func TestEarnGems_EmptyUserID_ReturnsValidationError(t *testing.T) {
 	svc := newTestService(defaultMockRepo())
 
 	resp, err := svc.EarnGems(context.Background(), model.EarnGemsRequest{
@@ -137,10 +145,11 @@ func TestEarnGems_EmptyUserID_ReturnsError(t *testing.T) {
 	})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "user_id is required")
+	assert.ErrorContains(t, err, "user_id is required")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestEarnGems_InvalidSource_ReturnsError(t *testing.T) {
+func TestEarnGems_InvalidSource_ReturnsValidationError(t *testing.T) {
 	svc := newTestService(defaultMockRepo())
 
 	for _, source := range []string{"daily_checkin", "reward", "payout", "invalid", ""} {
@@ -152,10 +161,11 @@ func TestEarnGems_InvalidSource_ReturnsError(t *testing.T) {
 
 		assert.Nil(t, resp, "source=%s should fail", source)
 		assert.ErrorContains(t, err, "invalid source", "source=%s should fail", source)
+		assert.True(t, errors.Is(err, model.ErrValidation), "source=%s should be validation error", source)
 	}
 }
 
-func TestEarnGems_ZeroAmount_ReturnsError(t *testing.T) {
+func TestEarnGems_ZeroAmount_ReturnsValidationError(t *testing.T) {
 	svc := newTestService(defaultMockRepo())
 
 	resp, err := svc.EarnGems(context.Background(), model.EarnGemsRequest{
@@ -165,10 +175,11 @@ func TestEarnGems_ZeroAmount_ReturnsError(t *testing.T) {
 	})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "amount must be greater than 0")
+	assert.ErrorContains(t, err, "amount must be greater than 0")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestEarnGems_NegativeAmount_ReturnsError(t *testing.T) {
+func TestEarnGems_NegativeAmount_ReturnsValidationError(t *testing.T) {
 	svc := newTestService(defaultMockRepo())
 
 	resp, err := svc.EarnGems(context.Background(), model.EarnGemsRequest{
@@ -178,13 +189,14 @@ func TestEarnGems_NegativeAmount_ReturnsError(t *testing.T) {
 	})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "amount must be greater than 0")
+	assert.ErrorContains(t, err, "amount must be greater than 0")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestEarnGems_UserNotFound_ReturnsError(t *testing.T) {
+func TestEarnGems_UserNotFound_ReturnsNotFoundError(t *testing.T) {
 	repo := defaultMockRepo()
 	repo.getUserByID = func(_ context.Context, _ string) (*model.User, error) {
-		return nil, fmt.Errorf("getting user by id: no rows")
+		return nil, model.ErrNotFound
 	}
 	svc := newTestService(repo)
 
@@ -196,6 +208,7 @@ func TestEarnGems_UserNotFound_ReturnsError(t *testing.T) {
 
 	assert.Nil(t, resp)
 	assert.ErrorContains(t, err, "validating user")
+	assert.True(t, errors.Is(err, model.ErrNotFound))
 }
 
 func TestEarnGems_NoActiveChallenge_ReturnsError(t *testing.T) {
@@ -213,6 +226,8 @@ func TestEarnGems_NoActiveChallenge_ReturnsError(t *testing.T) {
 
 	assert.Nil(t, resp)
 	assert.ErrorContains(t, err, "getting active challenge")
+	assert.False(t, errors.Is(err, model.ErrValidation), "should not be validation error")
+	assert.False(t, errors.Is(err, model.ErrNotFound), "should not be not-found error")
 }
 
 func TestEarnGems_AllValidSources_Succeeds(t *testing.T) {
@@ -246,6 +261,24 @@ func TestEarnGems_GemHistoryInsertFails_ReturnsError(t *testing.T) {
 
 	assert.Nil(t, resp)
 	assert.ErrorContains(t, err, "recording gem history")
+	assert.False(t, errors.Is(err, model.ErrValidation), "should not be validation error")
+}
+
+func TestEarnGems_TransactionFails_ReturnsError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.runInTx = func(_ context.Context, _ func(ctx context.Context) error) error {
+		return fmt.Errorf("connection pool exhausted")
+	}
+	svc := newTestService(repo)
+
+	resp, err := svc.EarnGems(context.Background(), model.EarnGemsRequest{
+		UserID: "user-1",
+		Source: "gameplay",
+		Amount: 100,
+	})
+
+	assert.Nil(t, resp)
+	assert.ErrorContains(t, err, "connection pool exhausted")
 }
 
 // =====================================================================
@@ -315,16 +348,17 @@ func TestCheckin_SkippedDay_ResetsStreak(t *testing.T) {
 	assert.Equal(t, 1, resp.CurrentStreak) // reset
 }
 
-func TestCheckin_EmptyUserID_ReturnsError(t *testing.T) {
+func TestCheckin_EmptyUserID_ReturnsValidationError(t *testing.T) {
 	svc := newTestService(defaultMockRepo())
 
 	resp, err := svc.Checkin(context.Background(), model.CheckinRequest{UserID: ""})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "user_id is required")
+	assert.ErrorContains(t, err, "user_id is required")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestCheckin_NoCheckinConfig_ReturnsError(t *testing.T) {
+func TestCheckin_NoCheckinConfig_ReturnsValidationError(t *testing.T) {
 	repo := defaultMockRepo()
 	repo.getTodayCheckin = func(_ context.Context, _ time.Time) (*model.DailyCheckin, error) {
 		return nil, nil
@@ -334,10 +368,11 @@ func TestCheckin_NoCheckinConfig_ReturnsError(t *testing.T) {
 	resp, err := svc.Checkin(context.Background(), model.CheckinRequest{UserID: "user-1"})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "no check-in available today")
+	assert.ErrorContains(t, err, "no check-in available today")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestCheckin_InactiveCheckin_ReturnsError(t *testing.T) {
+func TestCheckin_InactiveCheckin_ReturnsValidationError(t *testing.T) {
 	repo := defaultMockRepo()
 	repo.getTodayCheckin = func(_ context.Context, _ time.Time) (*model.DailyCheckin, error) {
 		return &model.DailyCheckin{ID: "checkin-1", BaseGems: 100, StreakMultiplier: 1.0, IsActive: false}, nil
@@ -347,10 +382,11 @@ func TestCheckin_InactiveCheckin_ReturnsError(t *testing.T) {
 	resp, err := svc.Checkin(context.Background(), model.CheckinRequest{UserID: "user-1"})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "no check-in available today")
+	assert.ErrorContains(t, err, "no check-in available today")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestCheckin_AlreadyCheckedIn_ReturnsError(t *testing.T) {
+func TestCheckin_AlreadyCheckedIn_ReturnsValidationError(t *testing.T) {
 	repo := defaultMockRepo()
 	repo.hasCheckedInToday = func(_ context.Context, _, _ string) (bool, error) {
 		return true, nil
@@ -360,13 +396,14 @@ func TestCheckin_AlreadyCheckedIn_ReturnsError(t *testing.T) {
 	resp, err := svc.Checkin(context.Background(), model.CheckinRequest{UserID: "user-1"})
 
 	assert.Nil(t, resp)
-	assert.EqualError(t, err, "already checked in today")
+	assert.ErrorContains(t, err, "already checked in today")
+	assert.True(t, errors.Is(err, model.ErrValidation))
 }
 
-func TestCheckin_UserNotFound_ReturnsError(t *testing.T) {
+func TestCheckin_UserNotFound_ReturnsNotFoundError(t *testing.T) {
 	repo := defaultMockRepo()
 	repo.getUserByID = func(_ context.Context, _ string) (*model.User, error) {
-		return nil, fmt.Errorf("getting user by id: no rows")
+		return nil, model.ErrNotFound
 	}
 	svc := newTestService(repo)
 
@@ -374,6 +411,7 @@ func TestCheckin_UserNotFound_ReturnsError(t *testing.T) {
 
 	assert.Nil(t, resp)
 	assert.ErrorContains(t, err, "validating user")
+	assert.True(t, errors.Is(err, model.ErrNotFound))
 }
 
 func TestCheckin_GemsRoundedCorrectly(t *testing.T) {
@@ -390,4 +428,17 @@ func TestCheckin_GemsRoundedCorrectly(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 94, resp.GemsEarned) // round(75 * 1.25) = round(93.75) = 94
+}
+
+func TestCheckin_TransactionFails_ReturnsError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.runInTx = func(_ context.Context, _ func(ctx context.Context) error) error {
+		return fmt.Errorf("connection pool exhausted")
+	}
+	svc := newTestService(repo)
+
+	resp, err := svc.Checkin(context.Background(), model.CheckinRequest{UserID: "user-1"})
+
+	assert.Nil(t, resp)
+	assert.ErrorContains(t, err, "connection pool exhausted")
 }

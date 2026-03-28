@@ -2,14 +2,24 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/kesyafebriana/cashdino/backend/internal/model"
 )
+
+// DBTX is satisfied by both *pgxpool.Pool and pgx.Tx.
+type DBTX interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+type txKey struct{}
 
 type Repository struct {
 	pool *pgxpool.Pool
@@ -19,20 +29,47 @@ func New(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
+// getDB returns the transaction from context if present, otherwise the pool.
+func (r *Repository) getDB(ctx context.Context) DBTX {
+	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
+		return tx
+	}
+	return r.pool
+}
+
+// RunInTx executes fn within a database transaction.
+// If fn returns an error the transaction is rolled back; otherwise it is committed.
+func (r *Repository) RunInTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	txCtx := context.WithValue(ctx, txKey{}, tx)
+	if err := fn(txCtx); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (r *Repository) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
 	var u model.User
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT id, username, email, created_at FROM users WHERE id = $1`,
 		userID,
 	).Scan(&u.ID, &u.Username, &u.Email, &u.CreatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("getting user by id: %w", model.ErrNotFound)
+		}
 		return nil, fmt.Errorf("getting user by id: %w", err)
 	}
 	return &u, nil
 }
 
 func (r *Repository) InsertGemHistory(ctx context.Context, userID, source string, amount int, gameName *string) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.getDB(ctx).Exec(ctx,
 		`INSERT INTO gem_history (user_id, source, amount, game_name) VALUES ($1, $2, $3, $4)`,
 		userID, source, amount, gameName,
 	)
@@ -44,7 +81,7 @@ func (r *Repository) InsertGemHistory(ctx context.Context, userID, source string
 
 func (r *Repository) GetActiveChallenge(ctx context.Context) (*model.WeeklyChallenge, error) {
 	var wc model.WeeklyChallenge
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT id, start_time, end_time, status FROM weekly_challenges WHERE status = 'active' LIMIT 1`,
 	).Scan(&wc.ID, &wc.StartTime, &wc.EndTime, &wc.Status)
 	if err != nil {
@@ -57,7 +94,7 @@ func (r *Repository) GetActiveChallenge(ctx context.Context) (*model.WeeklyChall
 // Returns the updated weekly_gems total.
 func (r *Repository) UpsertLeaderboardEntry(ctx context.Context, challengeID, userID, displayName string, amount int) (int, error) {
 	var weeklyGems int
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`INSERT INTO leaderboard_entries (challenge_id, user_id, weekly_gems, first_gem_earned_at, display_name)
 		 VALUES ($1, $2, $3, NOW(), $4)
 		 ON CONFLICT (challenge_id, user_id)
@@ -76,7 +113,7 @@ func (r *Repository) UpsertLeaderboardEntry(ctx context.Context, challengeID, us
 // DisplayNameExists checks if a display_name is already taken for a given challenge.
 func (r *Repository) DisplayNameExists(ctx context.Context, challengeID, displayName string) (bool, error) {
 	var exists bool
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM leaderboard_entries WHERE challenge_id = $1 AND display_name = $2)`,
 		challengeID, displayName,
 	).Scan(&exists)
@@ -89,13 +126,13 @@ func (r *Repository) DisplayNameExists(ctx context.Context, challengeID, display
 // GetTodayCheckin returns today's daily_checkins config, or nil if none exists.
 func (r *Repository) GetTodayCheckin(ctx context.Context, today time.Time) (*model.DailyCheckin, error) {
 	var dc model.DailyCheckin
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT id, date, base_gems, streak_multiplier, is_active
 		 FROM daily_checkins WHERE date = $1`,
 		today.Format("2006-01-02"),
 	).Scan(&dc.ID, &dc.Date, &dc.BaseGems, &dc.StreakMultiplier, &dc.IsActive)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("getting today checkin: %w", err)
@@ -106,7 +143,7 @@ func (r *Repository) GetTodayCheckin(ctx context.Context, today time.Time) (*mod
 // HasCheckedInToday checks if a user already has a record for the given checkin_id.
 func (r *Repository) HasCheckedInToday(ctx context.Context, userID, checkinID string) (bool, error) {
 	var exists bool
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM user_daily_checkins WHERE user_id = $1 AND checkin_id = $2)`,
 		userID, checkinID,
 	).Scan(&exists)
@@ -119,7 +156,7 @@ func (r *Repository) HasCheckedInToday(ctx context.Context, userID, checkinID st
 // GetLastCheckin returns the user's most recent user_daily_checkins record.
 func (r *Repository) GetLastCheckin(ctx context.Context, userID string) (*model.UserDailyCheckin, error) {
 	var udc model.UserDailyCheckin
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT id, user_id, checkin_id, gems_earned, current_streak, checked_in_at
 		 FROM user_daily_checkins
 		 WHERE user_id = $1
@@ -128,7 +165,7 @@ func (r *Repository) GetLastCheckin(ctx context.Context, userID string) (*model.
 		userID,
 	).Scan(&udc.ID, &udc.UserID, &udc.CheckinID, &udc.GemsEarned, &udc.CurrentStreak, &udc.CheckedInAt)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("getting last checkin: %w", err)
@@ -139,7 +176,7 @@ func (r *Repository) GetLastCheckin(ctx context.Context, userID string) (*model.
 // GetCheckinDate returns the date for a given checkin_id.
 func (r *Repository) GetCheckinDate(ctx context.Context, checkinID string) (time.Time, error) {
 	var date time.Time
-	err := r.pool.QueryRow(ctx,
+	err := r.getDB(ctx).QueryRow(ctx,
 		`SELECT date FROM daily_checkins WHERE id = $1`,
 		checkinID,
 	).Scan(&date)
@@ -150,7 +187,7 @@ func (r *Repository) GetCheckinDate(ctx context.Context, checkinID string) (time
 }
 
 func (r *Repository) InsertUserDailyCheckin(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error {
-	_, err := r.pool.Exec(ctx,
+	_, err := r.getDB(ctx).Exec(ctx,
 		`INSERT INTO user_daily_checkins (user_id, checkin_id, gems_earned, current_streak)
 		 VALUES ($1, $2, $3, $4)`,
 		userID, checkinID, gemsEarned, currentStreak,

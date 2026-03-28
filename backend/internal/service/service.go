@@ -20,6 +20,7 @@ type Repository interface {
 	GetLastCheckin(ctx context.Context, userID string) (*model.UserDailyCheckin, error)
 	GetCheckinDate(ctx context.Context, checkinID string) (time.Time, error)
 	InsertUserDailyCheckin(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
 var allowedEarnSources = map[string]bool{
@@ -40,13 +41,13 @@ func New(repo Repository) *Service {
 
 func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {
 	if req.UserID == "" {
-		return nil, fmt.Errorf("user_id is required")
+		return nil, model.ValidationErr("user_id is required")
 	}
 	if !allowedEarnSources[req.Source] {
-		return nil, fmt.Errorf("invalid source: must be one of gameplay, survey, referral, boost")
+		return nil, model.ValidationErr("invalid source: must be one of gameplay, survey, referral, boost")
 	}
 	if req.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be greater than 0")
+		return nil, model.ValidationErr("amount must be greater than 0")
 	}
 
 	// Verify user exists and get username for display name
@@ -55,27 +56,31 @@ func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*mod
 		return nil, fmt.Errorf("validating user: %w", err)
 	}
 
-	// Insert gem_history
-	if err := s.repo.InsertGemHistory(ctx, req.UserID, req.Source, req.Amount, req.GameName); err != nil {
-		return nil, fmt.Errorf("recording gem history: %w", err)
-	}
+	// All writes in a single transaction
+	var weeklyGems int
+	err = s.repo.RunInTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.InsertGemHistory(ctx, req.UserID, req.Source, req.Amount, req.GameName); err != nil {
+			return fmt.Errorf("recording gem history: %w", err)
+		}
 
-	// Get active challenge
-	challenge, err := s.repo.GetActiveChallenge(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting active challenge: %w", err)
-	}
+		challenge, err := s.repo.GetActiveChallenge(ctx)
+		if err != nil {
+			return fmt.Errorf("getting active challenge: %w", err)
+		}
 
-	// Generate display name for potential new entry
-	displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
-	if err != nil {
-		return nil, fmt.Errorf("generating display name: %w", err)
-	}
+		displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
+		if err != nil {
+			return fmt.Errorf("generating display name: %w", err)
+		}
 
-	// Upsert leaderboard entry
-	weeklyGems, err := s.repo.UpsertLeaderboardEntry(ctx, challenge.ID, req.UserID, displayName, req.Amount)
+		weeklyGems, err = s.repo.UpsertLeaderboardEntry(ctx, challenge.ID, req.UserID, displayName, req.Amount)
+		if err != nil {
+			return fmt.Errorf("updating leaderboard: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("updating leaderboard: %w", err)
+		return nil, err
 	}
 
 	return &model.EarnGemsResponse{
@@ -86,7 +91,7 @@ func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*mod
 
 func (s *Service) Checkin(ctx context.Context, req model.CheckinRequest) (*model.CheckinResponse, error) {
 	if req.UserID == "" {
-		return nil, fmt.Errorf("user_id is required")
+		return nil, model.ValidationErr("user_id is required")
 	}
 
 	// Verify user exists
@@ -102,7 +107,7 @@ func (s *Service) Checkin(ctx context.Context, req model.CheckinRequest) (*model
 		return nil, fmt.Errorf("getting today checkin config: %w", err)
 	}
 	if todayCheckin == nil || !todayCheckin.IsActive {
-		return nil, fmt.Errorf("no check-in available today")
+		return nil, model.ValidationErr("no check-in available today")
 	}
 
 	// Check if already checked in today
@@ -111,7 +116,7 @@ func (s *Service) Checkin(ctx context.Context, req model.CheckinRequest) (*model
 		return nil, fmt.Errorf("checking existing checkin: %w", err)
 	}
 	if alreadyCheckedIn {
-		return nil, fmt.Errorf("already checked in today")
+		return nil, model.ValidationErr("already checked in today")
 	}
 
 	// Calculate streak
@@ -134,30 +139,35 @@ func (s *Service) Checkin(ctx context.Context, req model.CheckinRequest) (*model
 	// Calculate gems earned
 	gemsEarned := int(math.Round(float64(todayCheckin.BaseGems) * todayCheckin.StreakMultiplier))
 
-	// Insert user_daily_checkins
-	if err := s.repo.InsertUserDailyCheckin(ctx, req.UserID, todayCheckin.ID, gemsEarned, currentStreak); err != nil {
-		return nil, fmt.Errorf("recording checkin: %w", err)
-	}
+	// All writes in a single transaction
+	var weeklyGems int
+	err = s.repo.RunInTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.InsertUserDailyCheckin(ctx, req.UserID, todayCheckin.ID, gemsEarned, currentStreak); err != nil {
+			return fmt.Errorf("recording checkin: %w", err)
+		}
 
-	// Insert gem_history
-	if err := s.repo.InsertGemHistory(ctx, req.UserID, "daily_checkin", gemsEarned, nil); err != nil {
-		return nil, fmt.Errorf("recording gem history for checkin: %w", err)
-	}
+		if err := s.repo.InsertGemHistory(ctx, req.UserID, "daily_checkin", gemsEarned, nil); err != nil {
+			return fmt.Errorf("recording gem history for checkin: %w", err)
+		}
 
-	// Get active challenge and upsert leaderboard
-	challenge, err := s.repo.GetActiveChallenge(ctx)
+		challenge, err := s.repo.GetActiveChallenge(ctx)
+		if err != nil {
+			return fmt.Errorf("getting active challenge: %w", err)
+		}
+
+		displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
+		if err != nil {
+			return fmt.Errorf("generating display name: %w", err)
+		}
+
+		weeklyGems, err = s.repo.UpsertLeaderboardEntry(ctx, challenge.ID, req.UserID, displayName, gemsEarned)
+		if err != nil {
+			return fmt.Errorf("updating leaderboard for checkin: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("getting active challenge: %w", err)
-	}
-
-	displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
-	if err != nil {
-		return nil, fmt.Errorf("generating display name: %w", err)
-	}
-
-	weeklyGems, err := s.repo.UpsertLeaderboardEntry(ctx, challenge.ID, req.UserID, displayName, gemsEarned)
-	if err != nil {
-		return nil, fmt.Errorf("updating leaderboard for checkin: %w", err)
+		return nil, err
 	}
 
 	return &model.CheckinResponse{
