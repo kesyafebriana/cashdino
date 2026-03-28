@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -402,4 +403,189 @@ func (r *Repository) GetResultRewards(ctx context.Context, challengeID string) (
 		result[userID] = append(result[userID], ri)
 	}
 	return result, rows.Err()
+}
+
+// =====================================================================
+// Admin campaign repository methods
+// =====================================================================
+
+// ListCampaigns returns all campaigns with linked challenge dates and reward stats.
+func (r *Repository) ListCampaigns(ctx context.Context) ([]model.AdminCampaignListItem, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT rc.id, rc.challenge_id, rc.name, rc.banner_image, rc.status,
+		        wc.start_time, wc.end_time,
+		        COUNT(rt.id) AS reward_types_count,
+		        COALESCE(SUM(rt.stock), 0) AS total_stock
+		 FROM reward_campaigns rc
+		 JOIN weekly_challenges wc ON rc.challenge_id = wc.id
+		 LEFT JOIN reward_types rt ON rt.campaign_id = rc.id
+		 GROUP BY rc.id, rc.challenge_id, rc.name, rc.banner_image, rc.status, wc.start_time, wc.end_time
+		 ORDER BY wc.start_time DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying campaigns: %w", err)
+	}
+	defer rows.Close()
+
+	var items []model.AdminCampaignListItem
+	for rows.Next() {
+		var item model.AdminCampaignListItem
+		if err := rows.Scan(&item.ID, &item.ChallengeID, &item.Name, &item.BannerImage, &item.Status,
+			&item.ChallengeStart, &item.ChallengeEnd, &item.RewardTypesCount, &item.TotalStock); err != nil {
+			return nil, fmt.Errorf("scanning campaign list item: %w", err)
+		}
+		items = append(items, item)
+	}
+	if items == nil {
+		items = []model.AdminCampaignListItem{}
+	}
+	return items, rows.Err()
+}
+
+// GetCampaignByID returns a single campaign with email template fields, or nil if not found.
+func (r *Repository) GetCampaignByID(ctx context.Context, id string) (*model.RewardCampaignFull, error) {
+	var c model.RewardCampaignFull
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT id, challenge_id, name, banner_image, rules, status,
+		        non_gem_claim_email_subject, non_gem_claim_email_body
+		 FROM reward_campaigns WHERE id = $1`,
+		id,
+	).Scan(&c.ID, &c.ChallengeID, &c.Name, &c.BannerImage, &c.Rules, &c.Status,
+		&c.NonGemClaimEmailSubject, &c.NonGemClaimEmailBody)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting campaign by id: %w", err)
+	}
+	return &c, nil
+}
+
+// GetRewardTypesByCampaign returns all reward_types for a campaign.
+func (r *Repository) GetRewardTypesByCampaign(ctx context.Context, campaignID string) ([]model.RewardType, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT id, campaign_id, name, type, value, image, stock
+		 FROM reward_types WHERE campaign_id = $1`,
+		campaignID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying reward types by campaign: %w", err)
+	}
+	defer rows.Close()
+
+	var types []model.RewardType
+	for rows.Next() {
+		var rt model.RewardType
+		if err := rows.Scan(&rt.ID, &rt.CampaignID, &rt.Name, &rt.Type, &rt.Value, &rt.Image, &rt.Stock); err != nil {
+			return nil, fmt.Errorf("scanning reward type: %w", err)
+		}
+		types = append(types, rt)
+	}
+	return types, rows.Err()
+}
+
+// CreateCampaign inserts a new reward_campaigns record and returns its ID.
+func (r *Repository) CreateCampaign(ctx context.Context, campaign *model.RewardCampaignFull) (string, error) {
+	var id string
+	err := r.getDB(ctx).QueryRow(ctx,
+		`INSERT INTO reward_campaigns (challenge_id, name, banner_image, rules, status, non_gem_claim_email_subject, non_gem_claim_email_body)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING id`,
+		campaign.ChallengeID, campaign.Name, campaign.BannerImage, campaign.Rules, campaign.Status,
+		campaign.NonGemClaimEmailSubject, campaign.NonGemClaimEmailBody,
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("inserting campaign: %w", err)
+	}
+	return id, nil
+}
+
+// CreateRewardType inserts a new reward_types record and returns its ID.
+func (r *Repository) CreateRewardType(ctx context.Context, rt *model.RewardType) (string, error) {
+	var id string
+	err := r.getDB(ctx).QueryRow(ctx,
+		`INSERT INTO reward_types (campaign_id, name, type, value, image, stock)
+		 VALUES ($1, $2, $3, $4, $5, $6)
+		 RETURNING id`,
+		rt.CampaignID, rt.Name, rt.Type, rt.Value, rt.Image, rt.Stock,
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("inserting reward type: %w", err)
+	}
+	return id, nil
+}
+
+// UpdateCampaignRules updates only the rules JSONB for a campaign.
+func (r *Repository) UpdateCampaignRules(ctx context.Context, campaignID string, rules json.RawMessage) error {
+	_, err := r.getDB(ctx).Exec(ctx,
+		`UPDATE reward_campaigns SET rules = $1 WHERE id = $2`,
+		rules, campaignID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating campaign rules: %w", err)
+	}
+	return nil
+}
+
+// UpdateCampaign updates all fields of a campaign.
+func (r *Repository) UpdateCampaign(ctx context.Context, campaign *model.RewardCampaignFull) error {
+	_, err := r.getDB(ctx).Exec(ctx,
+		`UPDATE reward_campaigns
+		 SET challenge_id = $1, name = $2, banner_image = $3, rules = $4, status = $5,
+		     non_gem_claim_email_subject = $6, non_gem_claim_email_body = $7
+		 WHERE id = $8`,
+		campaign.ChallengeID, campaign.Name, campaign.BannerImage, campaign.Rules, campaign.Status,
+		campaign.NonGemClaimEmailSubject, campaign.NonGemClaimEmailBody, campaign.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("updating campaign: %w", err)
+	}
+	return nil
+}
+
+// DeleteRewardTypesByCampaign deletes all reward_types for a campaign.
+func (r *Repository) DeleteRewardTypesByCampaign(ctx context.Context, campaignID string) error {
+	_, err := r.getDB(ctx).Exec(ctx,
+		`DELETE FROM reward_types WHERE campaign_id = $1`,
+		campaignID,
+	)
+	if err != nil {
+		return fmt.Errorf("deleting reward types by campaign: %w", err)
+	}
+	return nil
+}
+
+// GetDistributions returns reward distributions for a campaign, joined with user/reward/result info.
+func (r *Repository) GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT rd.id, rd.user_id, wcr.display_name,
+		        CONCAT(LEFT(u.email, 2), '****@', SPLIT_PART(u.email, '@', 2)) AS masked_email,
+		        rt.name, rt.type, rt.value, rt.image,
+		        rd.status, rd.delivered_at, rd.email_sent_at,
+		        wcr.final_rank
+		 FROM reward_distributions rd
+		 JOIN users u ON rd.user_id = u.id
+		 JOIN reward_types rt ON rd.reward_type_id = rt.id
+		 JOIN reward_campaigns rc ON rd.campaign_id = rc.id
+		 JOIN weekly_challenge_results wcr ON wcr.challenge_id = rc.challenge_id AND wcr.user_id = rd.user_id
+		 WHERE rd.campaign_id = $1
+		 ORDER BY wcr.final_rank ASC`,
+		campaignID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying distributions: %w", err)
+	}
+	defer rows.Close()
+
+	var items []model.AdminDistributionRow
+	for rows.Next() {
+		var item model.AdminDistributionRow
+		if err := rows.Scan(&item.ID, &item.UserID, &item.DisplayName, &item.MaskedEmail,
+			&item.RewardName, &item.RewardType, &item.RewardValue, &item.RewardImage,
+			&item.Status, &item.DeliveredAt, &item.EmailSentAt, &item.FinalRank); err != nil {
+			return nil, fmt.Errorf("scanning distribution row: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }

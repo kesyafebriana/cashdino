@@ -25,6 +25,11 @@ type mockService struct {
 	getBanner            func(ctx context.Context, userID string) (*model.BannerResponse, error)
 	getCurrentLeaderboard func(ctx context.Context, userID string) (*model.CurrentLeaderboardResponse, error)
 	getLastWeekLeaderboard func(ctx context.Context, userID string) (*model.LastWeekResponse, error)
+	listCampaigns        func(ctx context.Context) ([]model.AdminCampaignListItem, error)
+	getCampaign          func(ctx context.Context, id string) (*model.AdminCampaignDetail, error)
+	createCampaign       func(ctx context.Context, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
+	updateCampaign       func(ctx context.Context, id string, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
+	getDistributions     func(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
 }
 
 func (m *mockService) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {
@@ -41,6 +46,21 @@ func (m *mockService) GetCurrentLeaderboard(ctx context.Context, userID string) 
 }
 func (m *mockService) GetLastWeekLeaderboard(ctx context.Context, userID string) (*model.LastWeekResponse, error) {
 	return m.getLastWeekLeaderboard(ctx, userID)
+}
+func (m *mockService) ListCampaigns(ctx context.Context) ([]model.AdminCampaignListItem, error) {
+	return m.listCampaigns(ctx)
+}
+func (m *mockService) GetCampaign(ctx context.Context, id string) (*model.AdminCampaignDetail, error) {
+	return m.getCampaign(ctx, id)
+}
+func (m *mockService) CreateCampaign(ctx context.Context, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+	return m.createCampaign(ctx, req)
+}
+func (m *mockService) UpdateCampaign(ctx context.Context, id string, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+	return m.updateCampaign(ctx, id, req)
+}
+func (m *mockService) GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error) {
+	return m.getDistributions(ctx, campaignID)
 }
 
 func newTestHandler(svc *mockService) (*Handler, *echo.Echo) {
@@ -398,4 +418,247 @@ func TestLastWeekHandler_NoCompletedChallenge_Returns200WithNullChallenge(t *tes
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"challenge":null`)
+}
+
+// =====================================================================
+// ListCampaigns handler tests
+// =====================================================================
+
+func TestListCampaignsHandler_Returns200(t *testing.T) {
+	svc := &mockService{
+		listCampaigns: func(_ context.Context) ([]model.AdminCampaignListItem, error) {
+			return []model.AdminCampaignListItem{
+				{ID: "camp-1", Name: "Week 14", Status: "active", RewardTypesCount: 3, TotalStock: 11},
+			}, nil
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/campaigns", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.ListCampaigns(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "camp-1")
+}
+
+func TestListCampaignsHandler_InternalError_Returns500(t *testing.T) {
+	svc := &mockService{
+		listCampaigns: func(_ context.Context) ([]model.AdminCampaignListItem, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/campaigns", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.ListCampaigns(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// =====================================================================
+// GetCampaign handler tests
+// =====================================================================
+
+func TestGetCampaignHandler_Returns200(t *testing.T) {
+	svc := &mockService{
+		getCampaign: func(_ context.Context, id string) (*model.AdminCampaignDetail, error) {
+			return &model.AdminCampaignDetail{
+				ID: id, Name: "Week 14", Status: "active",
+				RewardTypes: []model.RewardType{{ID: "rt-1", Name: "10K Gems"}},
+				Rules:       []model.AdminCampaignRuleDetail{{RankFrom: 1, RankTo: 1, RewardNames: []string{"10K Gems"}}},
+			}, nil
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/campaigns/camp-1", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("camp-1")
+
+	err := h.GetCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "camp-1")
+}
+
+func TestGetCampaignHandler_NotFound_Returns404(t *testing.T) {
+	svc := &mockService{
+		getCampaign: func(_ context.Context, _ string) (*model.AdminCampaignDetail, error) {
+			return nil, model.NotFoundErr("campaign not found")
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/campaigns/nonexistent", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("nonexistent")
+
+	err := h.GetCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+// =====================================================================
+// CreateCampaign handler tests
+// =====================================================================
+
+func TestCreateCampaignHandler_ValidRequest_Returns201(t *testing.T) {
+	svc := &mockService{
+		createCampaign: func(_ context.Context, _ model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+			return &model.AdminCampaignDetail{ID: "camp-new", Name: "Week 14"}, nil
+		},
+	}
+	h, e := newTestHandler(svc)
+	body := `{"challenge_id":"ch-1","name":"Week 14","banner_image":"https://img.png","reward_types":[{"name":"10K Gems","type":"gems","value":10000,"stock":1}],"rules":[{"rank_from":1,"rank_to":1,"reward_type_indexes":[0]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/campaigns", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.CreateCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+	assert.Contains(t, rec.Body.String(), "camp-new")
+}
+
+func TestCreateCampaignHandler_InvalidJSON_Returns400(t *testing.T) {
+	svc := &mockService{}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/campaigns", strings.NewReader("{bad"))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.CreateCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestCreateCampaignHandler_ValidationError_Returns400(t *testing.T) {
+	svc := &mockService{
+		createCampaign: func(_ context.Context, _ model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+			return nil, model.ValidationErr("overlapping rank ranges")
+		},
+	}
+	h, e := newTestHandler(svc)
+	body := `{"challenge_id":"ch-1","name":"Week 14","banner_image":"https://img.png","reward_types":[{"name":"10K Gems","type":"gems","value":10000,"stock":1}],"rules":[{"rank_from":1,"rank_to":1,"reward_type_indexes":[0]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/campaigns", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.CreateCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), "overlapping rank ranges")
+}
+
+// =====================================================================
+// UpdateCampaign handler tests
+// =====================================================================
+
+func TestUpdateCampaignHandler_ValidRequest_Returns200(t *testing.T) {
+	svc := &mockService{
+		updateCampaign: func(_ context.Context, id string, _ model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+			return &model.AdminCampaignDetail{ID: id, Name: "Week 14 Updated"}, nil
+		},
+	}
+	h, e := newTestHandler(svc)
+	body := `{"challenge_id":"ch-1","name":"Week 14 Updated","banner_image":"https://img.png","reward_types":[{"name":"10K Gems","type":"gems","value":10000,"stock":1}],"rules":[{"rank_from":1,"rank_to":1,"reward_type_indexes":[0]}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/campaigns/camp-1", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("camp-1")
+
+	err := h.UpdateCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Week 14 Updated")
+}
+
+func TestUpdateCampaignHandler_NotFound_Returns404(t *testing.T) {
+	svc := &mockService{
+		updateCampaign: func(_ context.Context, _ string, _ model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+			return nil, model.NotFoundErr("campaign not found")
+		},
+	}
+	h, e := newTestHandler(svc)
+	body := `{"challenge_id":"ch-1","name":"Week 14","banner_image":"https://img.png","reward_types":[{"name":"10K Gems","type":"gems","value":10000,"stock":1}],"rules":[{"rank_from":1,"rank_to":1,"reward_type_indexes":[0]}]}`
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/campaigns/nonexistent", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("nonexistent")
+
+	err := h.UpdateCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestUpdateCampaignHandler_InvalidJSON_Returns400(t *testing.T) {
+	svc := &mockService{}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/campaigns/camp-1", strings.NewReader("{bad"))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("camp-1")
+
+	err := h.UpdateCampaign(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// =====================================================================
+// GetDistributions handler tests
+// =====================================================================
+
+func TestGetDistributionsHandler_Returns200(t *testing.T) {
+	delivered := time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)
+	svc := &mockService{
+		getDistributions: func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
+			return []model.AdminDistributionRow{
+				{ID: "dist-1", UserID: "user-1", DisplayName: "ja****s", RewardName: "10K Gems", Status: "delivered", DeliveredAt: &delivered, FinalRank: 1},
+			}, nil
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/campaigns/camp-1/distributions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("camp-1")
+
+	err := h.GetDistributions(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "dist-1")
+}
+
+func TestGetDistributionsHandler_InternalError_Returns500(t *testing.T) {
+	svc := &mockService{
+		getDistributions: func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/campaigns/camp-1/distributions", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("camp-1")
+
+	err := h.GetDistributions(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }

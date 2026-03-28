@@ -195,3 +195,87 @@ type LastWeekUserInfo struct {
 	FinalGems   int          `json:"final_gems"`
 	Rewards     []RewardInfo `json:"rewards"`
 }
+
+// Admin campaign request/response types
+
+type CreateCampaignRequest struct {
+	ChallengeID            string                   `json:"challenge_id"`
+	Name                   string                   `json:"name"`
+	BannerImage            string                   `json:"banner_image"`
+	RewardTypes            []CreateRewardTypeInput   `json:"reward_types"`
+	Rules                  []CreateCampaignRuleInput `json:"rules"`
+	NonGemClaimEmailSubject string                  `json:"non_gem_claim_email_subject"`
+	NonGemClaimEmailBody    string                  `json:"non_gem_claim_email_body"`
+}
+
+type CreateRewardTypeInput struct {
+	Name  string  `json:"name"`
+	Type  string  `json:"type"`
+	Value float64 `json:"value"`
+	Image *string `json:"image"`
+	Stock int     `json:"stock"`
+}
+
+type CreateCampaignRuleInput struct {
+	RankFrom          int   `json:"rank_from"`
+	RankTo            int   `json:"rank_to"`
+	RewardTypeIndexes []int `json:"reward_type_indexes"`
+}
+
+type AdminCampaignListItem struct {
+	ID               string    `json:"id"`
+	ChallengeID      string    `json:"challenge_id"`
+	Name             string    `json:"name"`
+	BannerImage      string    `json:"banner_image"`
+	Status           string    `json:"status"`
+	ChallengeStart   time.Time `json:"challenge_start"`
+	ChallengeEnd     time.Time `json:"challenge_end"`
+	RewardTypesCount int       `json:"reward_types_count"`
+	TotalStock       int       `json:"total_stock"`
+}
+
+type AdminCampaignDetail struct {
+	ID                      string                    `json:"id"`
+	ChallengeID             string                    `json:"challenge_id"`
+	Name                    string                    `json:"name"`
+	BannerImage             string                    `json:"banner_image"`
+	Status                  string                    `json:"status"`
+	NonGemClaimEmailSubject string                    `json:"non_gem_claim_email_subject"`
+	NonGemClaimEmailBody    string                    `json:"non_gem_claim_email_body"`
+	RewardTypes             []RewardType              `json:"reward_types"`
+	Rules                   []AdminCampaignRuleDetail `json:"rules"`
+}
+
+type AdminCampaignRuleDetail struct {
+	RankFrom    int          `json:"rank_from"`
+	RankTo      int          `json:"rank_to"`
+	RewardNames []string     `json:"reward_names"`
+	RewardTypes []RewardInfo `json:"reward_types"`
+}
+
+type AdminDistributionRow struct {
+	ID             string     `json:"id"`
+	UserID         string     `json:"user_id"`
+	DisplayName    string     `json:"display_name"`
+	MaskedEmail    string     `json:"masked_email"`
+	RewardName     string     `json:"reward_name"`
+	RewardType     string     `json:"reward_type"`
+	RewardValue    float64    `json:"reward_value"`
+	RewardImage    *string    `json:"reward_image"`
+	Status         string     `json:"status"`
+	DeliveredAt    *time.Time `json:"delivered_at"`
+	EmailSentAt    *time.Time `json:"email_sent_at"`
+	FinalRank      int        `json:"final_rank"`
+}
+
+// RewardCampaignFull includes email template fields not in the base RewardCampaign
+type RewardCampaignFull struct {
+	ID                      string          `json:"id"`
+	ChallengeID             string          `json:"challenge_id"`
+	Name                    string          `json:"name"`
+	BannerImage             string          `json:"banner_image"`
+	Rules                   json.RawMessage `json:"rules"`
+	Status                  string          `json:"status"`
+	NonGemClaimEmailSubject string          `json:"non_gem_claim_email_subject"`
+	NonGemClaimEmailBody    string          `json:"non_gem_claim_email_body"`
+}

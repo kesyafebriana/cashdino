@@ -31,5 +31,12 @@ func New(pool *pgxpool.Pool) *echo.Echo {
 	e.GET("/api/leaderboard/current", h.GetCurrentLeaderboard)
 	e.GET("/api/leaderboard/last-week", h.GetLastWeekLeaderboard)
 
+	// Admin routes
+	e.GET("/api/admin/campaigns", h.ListCampaigns)
+	e.GET("/api/admin/campaigns/:id", h.GetCampaign)
+	e.POST("/api/admin/campaigns", h.CreateCampaign)
+	e.PUT("/api/admin/campaigns/:id", h.UpdateCampaign)
+	e.GET("/api/admin/campaigns/:id/distributions", h.GetDistributions)
+
 	return e
 }
