@@ -27,6 +27,9 @@ func New(pool *pgxpool.Pool) *echo.Echo {
 	e.GET("/api/health", h.Health)
 	e.POST("/api/gems/earn", h.EarnGems)
 	e.POST("/api/checkin", h.Checkin)
+	e.GET("/api/challenge/banner", h.GetBanner)
+	e.GET("/api/leaderboard/current", h.GetCurrentLeaderboard)
+	e.GET("/api/leaderboard/last-week", h.GetLastWeekLeaderboard)
 
 	return e
 }

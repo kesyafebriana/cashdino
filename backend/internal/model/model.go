@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID        string    `json:"id"`
@@ -26,20 +29,20 @@ type WeeklyChallenge struct {
 }
 
 type LeaderboardEntry struct {
-	ID                string     `json:"id"`
-	ChallengeID       string     `json:"challenge_id"`
-	UserID            string     `json:"user_id"`
-	WeeklyGems        int        `json:"weekly_gems"`
-	FirstGemEarnedAt  *time.Time `json:"first_gem_earned_at,omitempty"`
-	DisplayName       string     `json:"display_name"`
+	ID               string     `json:"id"`
+	ChallengeID      string     `json:"challenge_id"`
+	UserID           string     `json:"user_id"`
+	WeeklyGems       int        `json:"weekly_gems"`
+	FirstGemEarnedAt *time.Time `json:"first_gem_earned_at,omitempty"`
+	DisplayName      string     `json:"display_name"`
 }
 
 type DailyCheckin struct {
-	ID               string    `json:"id"`
-	Date             time.Time `json:"date"`
-	BaseGems         int     `json:"base_gems"`
-	StreakMultiplier  float64 `json:"streak_multiplier"`
-	IsActive         bool    `json:"is_active"`
+	ID              string    `json:"id"`
+	Date            time.Time `json:"date"`
+	BaseGems        int       `json:"base_gems"`
+	StreakMultiplier float64   `json:"streak_multiplier"`
+	IsActive        bool      `json:"is_active"`
 }
 
 type UserDailyCheckin struct {
@@ -49,6 +52,40 @@ type UserDailyCheckin struct {
 	GemsEarned    int       `json:"gems_earned"`
 	CurrentStreak int       `json:"current_streak"`
 	CheckedInAt   time.Time `json:"checked_in_at"`
+}
+
+type WeeklyChallengeResult struct {
+	ID          string `json:"id"`
+	ChallengeID string `json:"challenge_id"`
+	UserID      string `json:"user_id"`
+	FinalRank   int    `json:"final_rank"`
+	FinalGems   int    `json:"final_gems"`
+	DisplayName string `json:"display_name"`
+}
+
+type RewardCampaign struct {
+	ID          string          `json:"id"`
+	ChallengeID string          `json:"challenge_id"`
+	Name        string          `json:"name"`
+	BannerImage string          `json:"banner_image"`
+	Rules       json.RawMessage `json:"rules"`
+	Status      string          `json:"status"`
+}
+
+type RewardType struct {
+	ID         string  `json:"id"`
+	CampaignID string  `json:"campaign_id"`
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`
+	Value      float64 `json:"value"`
+	Image      *string `json:"image"`
+	Stock      int     `json:"stock"`
+}
+
+type RewardRule struct {
+	RankFrom      int      `json:"rank_from"`
+	RankTo        int      `json:"rank_to"`
+	RewardTypeIDs []string `json:"reward_type_ids"`
 }
 
 // Request/response types
@@ -73,4 +110,88 @@ type CheckinResponse struct {
 	GemsEarned    int `json:"gems_earned"`
 	CurrentStreak int `json:"current_streak"`
 	WeeklyGems    int `json:"weekly_gems"`
+}
+
+// Banner endpoint response
+type BannerResponse struct {
+	ChallengeID string    `json:"challenge_id"`
+	EndTime     time.Time `json:"end_time"`
+	WeeklyGems  int       `json:"weekly_gems"`
+	RankDisplay string    `json:"rank_display"`
+	GapToNext   *int      `json:"gap_to_next"`
+	DisplayName string    `json:"display_name"`
+}
+
+// Current leaderboard endpoint response
+type CurrentLeaderboardResponse struct {
+	Challenge   ChallengeInfo          `json:"challenge"`
+	Leaderboard []CurrentLeaderboardRow `json:"leaderboard"`
+	CurrentUser *CurrentUserInfo       `json:"current_user"`
+	Campaign    *CampaignSummary       `json:"campaign"`
+}
+
+type ChallengeInfo struct {
+	ID        string    `json:"id"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+	Status    string    `json:"status"`
+}
+
+type CurrentLeaderboardRow struct {
+	Rank        int    `json:"rank"`
+	DisplayName string `json:"display_name"`
+	WeeklyGems  int    `json:"weekly_gems"`
+}
+
+type CurrentUserInfo struct {
+	Rank        *int   `json:"rank"`
+	RankDisplay string `json:"rank_display"`
+	WeeklyGems  int    `json:"weekly_gems"`
+	GapToNext   *int   `json:"gap_to_next"`
+	DisplayName string `json:"display_name"`
+}
+
+type CampaignSummary struct {
+	BannerImage    string              `json:"banner_image"`
+	RewardsSummary []RewardsSummaryRow `json:"rewards_summary"`
+}
+
+type RewardsSummaryRow struct {
+	RankFrom int          `json:"rank_from"`
+	RankTo   int          `json:"rank_to"`
+	Rewards  []RewardInfo `json:"rewards"`
+}
+
+type RewardInfo struct {
+	Name  string  `json:"name"`
+	Image *string `json:"image"`
+	Value float64 `json:"value"`
+	Type  string  `json:"type"`
+}
+
+// Last week leaderboard endpoint response
+type LastWeekResponse struct {
+	Challenge   *LastWeekChallengeInfo `json:"challenge"`
+	Leaderboard []LastWeekRow         `json:"leaderboard,omitempty"`
+	CurrentUser *LastWeekUserInfo     `json:"current_user,omitempty"`
+}
+
+type LastWeekChallengeInfo struct {
+	ID        string    `json:"id"`
+	StartTime time.Time `json:"start_time"`
+	EndTime   time.Time `json:"end_time"`
+}
+
+type LastWeekRow struct {
+	Rank        int          `json:"rank"`
+	DisplayName string       `json:"display_name"`
+	FinalGems   int          `json:"final_gems"`
+	Rewards     []RewardInfo `json:"rewards"`
+}
+
+type LastWeekUserInfo struct {
+	Rank        *int         `json:"rank"`
+	RankDisplay string       `json:"rank_display"`
+	FinalGems   int          `json:"final_gems"`
+	Rewards     []RewardInfo `json:"rewards"`
 }

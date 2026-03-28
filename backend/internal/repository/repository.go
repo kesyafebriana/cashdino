@@ -16,6 +16,7 @@ import (
 // DBTX is satisfied by both *pgxpool.Pool and pgx.Tx.
 type DBTX interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
@@ -85,6 +86,9 @@ func (r *Repository) GetActiveChallenge(ctx context.Context) (*model.WeeklyChall
 		`SELECT id, start_time, end_time, status FROM weekly_challenges WHERE status = 'active' LIMIT 1`,
 	).Scan(&wc.ID, &wc.StartTime, &wc.EndTime, &wc.Status)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("getting active challenge: %w", model.ErrNotFound)
+		}
 		return nil, fmt.Errorf("getting active challenge: %w", err)
 	}
 	return &wc, nil
@@ -220,4 +224,182 @@ func maskName(name string) string {
 		return string(runes[0:1]) + "****"
 	}
 	return string(runes[0:2]) + "****" + string(runes[len(runes)-1:])
+}
+
+// GetTop99Entries returns the top 99 leaderboard entries for a challenge,
+// ordered by weekly_gems DESC, first_gem_earned_at ASC.
+func (r *Repository) GetTop99Entries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT id, challenge_id, user_id, weekly_gems, first_gem_earned_at, display_name
+		 FROM leaderboard_entries
+		 WHERE challenge_id = $1 AND weekly_gems > 0
+		 ORDER BY weekly_gems DESC, first_gem_earned_at ASC
+		 LIMIT 99`,
+		challengeID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying top 99 entries: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []model.LeaderboardEntry
+	for rows.Next() {
+		var e model.LeaderboardEntry
+		if err := rows.Scan(&e.ID, &e.ChallengeID, &e.UserID, &e.WeeklyGems, &e.FirstGemEarnedAt, &e.DisplayName); err != nil {
+			return nil, fmt.Errorf("scanning leaderboard entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetUserEntry returns a specific user's leaderboard entry for a challenge, or nil if not found.
+func (r *Repository) GetUserEntry(ctx context.Context, challengeID, userID string) (*model.LeaderboardEntry, error) {
+	var e model.LeaderboardEntry
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT id, challenge_id, user_id, weekly_gems, first_gem_earned_at, display_name
+		 FROM leaderboard_entries
+		 WHERE challenge_id = $1 AND user_id = $2`,
+		challengeID, userID,
+	).Scan(&e.ID, &e.ChallengeID, &e.UserID, &e.WeeklyGems, &e.FirstGemEarnedAt, &e.DisplayName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting user entry: %w", err)
+	}
+	return &e, nil
+}
+
+// GetLastCompletedChallenge returns the most recent completed challenge, or nil if none.
+func (r *Repository) GetLastCompletedChallenge(ctx context.Context) (*model.WeeklyChallenge, error) {
+	var wc model.WeeklyChallenge
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT id, start_time, end_time, status
+		 FROM weekly_challenges
+		 WHERE status = 'completed'
+		 ORDER BY end_time DESC
+		 LIMIT 1`,
+	).Scan(&wc.ID, &wc.StartTime, &wc.EndTime, &wc.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting last completed challenge: %w", err)
+	}
+	return &wc, nil
+}
+
+// GetTop99Results returns the top 99 results for a completed challenge.
+func (r *Repository) GetTop99Results(ctx context.Context, challengeID string) ([]model.WeeklyChallengeResult, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT id, challenge_id, user_id, final_rank, final_gems, display_name
+		 FROM weekly_challenge_results
+		 WHERE challenge_id = $1
+		 ORDER BY final_rank ASC
+		 LIMIT 99`,
+		challengeID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying top 99 results: %w", err)
+	}
+	defer rows.Close()
+
+	var results []model.WeeklyChallengeResult
+	for rows.Next() {
+		var r model.WeeklyChallengeResult
+		if err := rows.Scan(&r.ID, &r.ChallengeID, &r.UserID, &r.FinalRank, &r.FinalGems, &r.DisplayName); err != nil {
+			return nil, fmt.Errorf("scanning challenge result: %w", err)
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// GetUserResult returns a specific user's result for a challenge, or nil if not found.
+func (r *Repository) GetUserResult(ctx context.Context, challengeID, userID string) (*model.WeeklyChallengeResult, error) {
+	var result model.WeeklyChallengeResult
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT id, challenge_id, user_id, final_rank, final_gems, display_name
+		 FROM weekly_challenge_results
+		 WHERE challenge_id = $1 AND user_id = $2`,
+		challengeID, userID,
+	).Scan(&result.ID, &result.ChallengeID, &result.UserID, &result.FinalRank, &result.FinalGems, &result.DisplayName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting user result: %w", err)
+	}
+	return &result, nil
+}
+
+// GetCampaignByChallenge returns the active/scheduled reward campaign for a challenge, or nil.
+func (r *Repository) GetCampaignByChallenge(ctx context.Context, challengeID string) (*model.RewardCampaign, error) {
+	var c model.RewardCampaign
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT id, challenge_id, name, banner_image, rules, status
+		 FROM reward_campaigns
+		 WHERE challenge_id = $1 AND status IN ('active', 'scheduled')
+		 LIMIT 1`,
+		challengeID,
+	).Scan(&c.ID, &c.ChallengeID, &c.Name, &c.BannerImage, &c.Rules, &c.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting campaign by challenge: %w", err)
+	}
+	return &c, nil
+}
+
+// GetRewardTypesByIDs returns reward types matching the given IDs.
+func (r *Repository) GetRewardTypesByIDs(ctx context.Context, ids []string) ([]model.RewardType, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT id, campaign_id, name, type, value, image, stock
+		 FROM reward_types
+		 WHERE id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying reward types: %w", err)
+	}
+	defer rows.Close()
+
+	var types []model.RewardType
+	for rows.Next() {
+		var rt model.RewardType
+		if err := rows.Scan(&rt.ID, &rt.CampaignID, &rt.Name, &rt.Type, &rt.Value, &rt.Image, &rt.Stock); err != nil {
+			return nil, fmt.Errorf("scanning reward type: %w", err)
+		}
+		types = append(types, rt)
+	}
+	return types, rows.Err()
+}
+
+// GetResultRewards returns reward distributions grouped by user_id for a given challenge.
+func (r *Repository) GetResultRewards(ctx context.Context, challengeID string) (map[string][]model.RewardInfo, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT rd.user_id, rt.name, rt.type, rt.value, rt.image
+		 FROM reward_distributions rd
+		 JOIN reward_types rt ON rd.reward_type_id = rt.id
+		 JOIN reward_campaigns rc ON rd.campaign_id = rc.id
+		 WHERE rc.challenge_id = $1 AND rd.status = 'delivered'`,
+		challengeID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("querying result rewards: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]model.RewardInfo)
+	for rows.Next() {
+		var userID string
+		var ri model.RewardInfo
+		if err := rows.Scan(&userID, &ri.Name, &ri.Type, &ri.Value, &ri.Image); err != nil {
+			return nil, fmt.Errorf("scanning reward distribution: %w", err)
+		}
+		result[userID] = append(result[userID], ri)
+	}
+	return result, rows.Err()
 }
