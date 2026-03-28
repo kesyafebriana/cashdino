@@ -9,17 +9,11 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+
+	"github.com/kesyafebriana/cashdino/backend/internal/server"
 )
 
 func main() {
-	e := echo.New()
-
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-	e.Use(middleware.CORS())
-
 	// Database connection
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -37,10 +31,8 @@ func main() {
 	}
 	log.Println("connected to database")
 
-	// Health check
-	e.GET("/api/health", func(c echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-	})
+	// Create server
+	e := server.New(pool)
 
 	// Start server
 	port := os.Getenv("API_PORT")
