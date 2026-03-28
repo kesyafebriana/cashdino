@@ -2,7 +2,6 @@ package server
 
 import (
 	"os"
-	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -22,10 +21,9 @@ func NewService(pool *pgxpool.Pool) *service.Service {
 
 func newEmailService() *service.EmailService {
 	host := os.Getenv("SMTP_HOST")
-	portStr := os.Getenv("SMTP_PORT")
-	port, _ := strconv.Atoi(portStr)
-	if port == 0 {
-		port = 587
+	port := os.Getenv("SMTP_PORT")
+	if port == "" {
+		port = "587"
 	}
 	user := os.Getenv("SMTP_USER")
 	pass := os.Getenv("SMTP_PASS")

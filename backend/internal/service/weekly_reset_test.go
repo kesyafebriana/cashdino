@@ -325,7 +325,7 @@ func TestWeeklyReset_NonGemReward_EmailFails_StatusFailed(t *testing.T) {
 	repo.updateCampaignStatus = func(_ context.Context, _, _ string) error { return nil }
 
 	// Use SMTP that will fail
-	failEmail := NewEmailService("localhost", 19999, "test@test.com", "pass")
+	failEmail := NewEmailService("localhost", "19999", "test@test.com", "pass")
 	svc := newTestServiceWithEmail(repo, failEmail)
 	svc.now = func() time.Time { return now }
 
@@ -497,7 +497,7 @@ func TestRetryFailedEmails_FailedRetry_IncrementsCount(t *testing.T) {
 		return 1, nil
 	}
 
-	failEmail := NewEmailService("localhost", 19999, "test@test.com", "pass")
+	failEmail := NewEmailService("localhost", "19999", "test@test.com", "pass")
 	svc := newTestServiceWithEmail(repo, failEmail)
 
 	err := svc.RetryFailedEmails(context.Background())
@@ -525,7 +525,7 @@ func TestRetryFailedEmails_ThirdFailure_LogsAlert(t *testing.T) {
 		return 3, nil
 	}
 
-	failEmail := NewEmailService("localhost", 19999, "test@test.com", "pass")
+	failEmail := NewEmailService("localhost", "19999", "test@test.com", "pass")
 	svc := newTestServiceWithEmail(repo, failEmail)
 
 	var buf bytes.Buffer

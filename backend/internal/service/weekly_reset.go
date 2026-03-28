@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"log"
-	"strings"
 	"time"
 
 	"github.com/kesyafebriana/cashdino/backend/internal/model"
@@ -209,8 +207,9 @@ func (s *Service) prepareNonGemReward(ctx context.Context, campaignID, userID st
 		return nil, fmt.Errorf("getting user for email: %w", err)
 	}
 
-	subject := replacePlaceholders(campaign.NonGemClaimEmailSubject, user.Username, rank, rt)
-	body := replacePlaceholders(campaign.NonGemClaimEmailBody, user.Username, rank, rt)
+	data := buildTemplateData(user.Username, rank, rt)
+	subject := s.email.RenderTemplate(campaign.NonGemClaimEmailSubject, data)
+	body := s.email.RenderTemplate(campaign.NonGemClaimEmailBody, data)
 
 	dist := &model.RewardDistribution{
 		CampaignID:   campaignID,
@@ -232,15 +231,30 @@ func (s *Service) prepareNonGemReward(ctx context.Context, campaignID, userID st
 	}, nil
 }
 
-func replacePlaceholders(template, username string, rank int, rt *model.RewardType) string {
-	s := template
-	s = strings.ReplaceAll(s, "{{username}}", username)
-	s = strings.ReplaceAll(s, "{{rank}}", fmt.Sprintf("%d", rank))
-	s = strings.ReplaceAll(s, "{{reward_type}}", rt.Name)
-	s = strings.ReplaceAll(s, "{{reward_value}}", fmt.Sprintf("%g", rt.Value))
-	s = strings.ReplaceAll(s, "{{reward_image}}", buildImageTag(rt.Image))
+func buildTemplateData(username string, rank int, rt *model.RewardType) map[string]string {
+	data := map[string]string{
+		"username":     username,
+		"rank":         fmt.Sprintf("%d", rank),
+		"reward_type":  rt.Name,
+		"reward_value": fmt.Sprintf("%g", rt.Value),
+	}
+	if rt.Image != nil {
+		data["reward_image"] = *rt.Image
+	}
+	return data
+}
 
-	return s
+func buildTemplateDataFromDist(dist model.FailedDistribution) map[string]string {
+	data := map[string]string{
+		"username":     dist.Username,
+		"rank":         fmt.Sprintf("%d", dist.FinalRank),
+		"reward_type":  dist.RewardTypeName,
+		"reward_value": fmt.Sprintf("%g", dist.RewardTypeValue),
+	}
+	if dist.RewardTypeImage != nil {
+		data["reward_image"] = *dist.RewardTypeImage
+	}
+	return data
 }
 
 // nextWeekBounds calculates the next Monday 00:00 UTC and Sunday 23:59:59 UTC.
@@ -263,8 +277,9 @@ func (s *Service) RetryFailedEmails(ctx context.Context) error {
 	}
 
 	for _, dist := range failed {
-		subject := replacePlaceholdersFromDist(dist.EmailSubject, dist)
-		body := replacePlaceholdersFromDist(dist.EmailBody, dist)
+		data := buildTemplateDataFromDist(dist)
+		subject := s.email.RenderTemplate(dist.EmailSubject, data)
+		body := s.email.RenderTemplate(dist.EmailBody, data)
 
 		emailErr := s.email.SendEmail(dist.Email, subject, body)
 		if emailErr == nil {
@@ -285,20 +300,3 @@ func (s *Service) RetryFailedEmails(ctx context.Context) error {
 	return nil
 }
 
-func replacePlaceholdersFromDist(template string, dist model.FailedDistribution) string {
-	s := template
-	s = strings.ReplaceAll(s, "{{username}}", dist.Username)
-	s = strings.ReplaceAll(s, "{{rank}}", fmt.Sprintf("%d", dist.FinalRank))
-	s = strings.ReplaceAll(s, "{{reward_type}}", dist.RewardTypeName)
-	s = strings.ReplaceAll(s, "{{reward_value}}", fmt.Sprintf("%g", dist.RewardTypeValue))
-	s = strings.ReplaceAll(s, "{{reward_image}}", buildImageTag(dist.RewardTypeImage))
-
-	return s
-}
-
-func buildImageTag(imageURL *string) string {
-	if imageURL == nil {
-		return ""
-	}
-	return fmt.Sprintf("<img src='%s' width='100'>", html.EscapeString(*imageURL))
-}

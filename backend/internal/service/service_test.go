@@ -319,7 +319,7 @@ func fixedNow() time.Time {
 }
 
 func newTestService(repo *mockRepo) *Service {
-	s := New(repo, NewEmailService("", 0, "", ""))
+	s := New(repo, NewEmailService("", "", "", ""))
 	s.now = fixedNow
 	return s
 }
