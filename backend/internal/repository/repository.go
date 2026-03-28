@@ -307,11 +307,11 @@ func (r *Repository) GetTop99Results(ctx context.Context, challengeID string) ([
 
 	var results []model.WeeklyChallengeResult
 	for rows.Next() {
-		var r model.WeeklyChallengeResult
-		if err := rows.Scan(&r.ID, &r.ChallengeID, &r.UserID, &r.FinalRank, &r.FinalGems, &r.DisplayName); err != nil {
+		var res model.WeeklyChallengeResult
+		if err := rows.Scan(&res.ID, &res.ChallengeID, &res.UserID, &res.FinalRank, &res.FinalGems, &res.DisplayName); err != nil {
 			return nil, fmt.Errorf("scanning challenge result: %w", err)
 		}
-		results = append(results, r)
+		results = append(results, res)
 	}
 	return results, rows.Err()
 }

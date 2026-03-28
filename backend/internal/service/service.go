@@ -77,7 +77,7 @@ func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*mod
 
 		challenge, err := s.repo.GetActiveChallenge(ctx)
 		if err != nil {
-			return fmt.Errorf("getting active challenge: %w", err)
+			return err
 		}
 
 		displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
@@ -111,7 +111,7 @@ func (s *Service) GetBanner(ctx context.Context, userID string) (*model.BannerRe
 		if errors.Is(err, model.ErrNotFound) {
 			return nil, nil // signals "no active challenge"
 		}
-		return nil, fmt.Errorf("getting active challenge: %w", err)
+		return nil, err
 	}
 
 	top99, err := s.repo.GetTop99Entries(ctx, challenge.ID)
@@ -159,7 +159,7 @@ func (s *Service) GetCurrentLeaderboard(ctx context.Context, userID string) (*mo
 
 	challenge, err := s.repo.GetActiveChallenge(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("getting active challenge: %w", err)
+		return nil, err
 	}
 
 	top99, err := s.repo.GetTop99Entries(ctx, challenge.ID)
@@ -406,7 +406,7 @@ func (s *Service) Checkin(ctx context.Context, req model.CheckinRequest) (*model
 
 		challenge, err := s.repo.GetActiveChallenge(ctx)
 		if err != nil {
-			return fmt.Errorf("getting active challenge: %w", err)
+			return err
 		}
 
 		displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
