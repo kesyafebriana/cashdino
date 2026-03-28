@@ -6,7 +6,7 @@
 - **Database:** PostgreSQL
 - **Email:** SMTP
 - **Cron:** robfig/cron library
-- **Hosting:** Docker on my VPS
+- **Hosting:** Railway/Render
 
 ---
 
