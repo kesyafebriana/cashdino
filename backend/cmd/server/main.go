@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	cronpkg "github.com/kesyafebriana/cashdino/backend/internal/cron"
 	"github.com/kesyafebriana/cashdino/backend/internal/server"
 )
 
@@ -31,8 +32,15 @@ func main() {
 	}
 	log.Println("connected to database")
 
+	// Create shared service for both HTTP server and cron jobs
+	svc := server.NewService(pool)
+
+	// Start cron scheduler
+	c := cronpkg.Start(svc)
+	defer c.Stop()
+
 	// Create server
-	e := server.New(pool)
+	e := server.New(svc)
 
 	// Start server
 	port := os.Getenv("API_PORT")

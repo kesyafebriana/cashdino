@@ -30,6 +30,7 @@ type mockService struct {
 	createCampaign       func(ctx context.Context, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
 	updateCampaign       func(ctx context.Context, id string, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
 	getDistributions     func(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
+	weeklyReset          func(ctx context.Context) (*model.WeeklyResetResponse, error)
 }
 
 func (m *mockService) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {
@@ -61,6 +62,9 @@ func (m *mockService) UpdateCampaign(ctx context.Context, id string, req model.C
 }
 func (m *mockService) GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error) {
 	return m.getDistributions(ctx, campaignID)
+}
+func (m *mockService) WeeklyReset(ctx context.Context) (*model.WeeklyResetResponse, error) {
+	return m.weeklyReset(ctx)
 }
 
 func newTestHandler(svc *mockService) (*Handler, *echo.Echo) {
@@ -661,4 +665,69 @@ func TestGetDistributionsHandler_InternalError_Returns500(t *testing.T) {
 	err := h.GetDistributions(c)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+// =====================================================================
+// ResetWeek handler tests
+// =====================================================================
+
+func TestResetWeekHandler_Success_Returns200(t *testing.T) {
+	svc := &mockService{
+		weeklyReset: func(_ context.Context) (*model.WeeklyResetResponse, error) {
+			return &model.WeeklyResetResponse{
+				Status:             "completed",
+				ResultsArchived:    50,
+				RewardsDistributed: 10,
+				NewChallengeID:     "new-ch-1",
+			}, nil
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/reset-week", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.ResetWeek(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp model.WeeklyResetResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, 50, resp.ResultsArchived)
+	assert.Equal(t, 10, resp.RewardsDistributed)
+	assert.Equal(t, "new-ch-1", resp.NewChallengeID)
+}
+
+func TestResetWeekHandler_NoActiveChallenge_Returns404(t *testing.T) {
+	svc := &mockService{
+		weeklyReset: func(_ context.Context) (*model.WeeklyResetResponse, error) {
+			return nil, fmt.Errorf("locking challenge: %w", model.ErrNotFound)
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/reset-week", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.ResetWeek(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestResetWeekHandler_InternalError_Returns500(t *testing.T) {
+	svc := &mockService{
+		weeklyReset: func(_ context.Context) (*model.WeeklyResetResponse, error) {
+			return nil, fmt.Errorf("db connection lost")
+		},
+	}
+	h, e := newTestHandler(svc)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/reset-week", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.ResetWeek(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.Contains(t, rec.Body.String(), "internal server error")
 }

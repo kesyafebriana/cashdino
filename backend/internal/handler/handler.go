@@ -20,6 +20,7 @@ type ServiceInterface interface {
 	CreateCampaign(ctx context.Context, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
 	UpdateCampaign(ctx context.Context, id string, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
 	GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
+	WeeklyReset(ctx context.Context) (*model.WeeklyResetResponse, error)
 }
 
 type Handler struct {

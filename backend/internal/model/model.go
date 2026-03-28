@@ -268,6 +268,43 @@ type AdminDistributionRow struct {
 	FinalRank      int        `json:"final_rank"`
 }
 
+// WeeklyResetResponse is returned by the POST /api/admin/reset-week endpoint.
+type WeeklyResetResponse struct {
+	Status             string `json:"status"`
+	ResultsArchived    int    `json:"results_archived"`
+	RewardsDistributed int    `json:"rewards_distributed"`
+	NewChallengeID     string `json:"new_challenge_id"`
+}
+
+// RewardDistribution represents a row in reward_distributions.
+type RewardDistribution struct {
+	ID           string     `json:"id"`
+	CampaignID   string     `json:"campaign_id"`
+	UserID       string     `json:"user_id"`
+	RewardTypeID string     `json:"reward_type_id"`
+	Status       string     `json:"status"`
+	DeliveredAt  *time.Time `json:"delivered_at"`
+	EmailSentAt  *time.Time `json:"email_sent_at"`
+	RetryCount   int        `json:"retry_count"`
+}
+
+// FailedDistribution contains all info needed to retry a failed email.
+type FailedDistribution struct {
+	ID              string  `json:"id"`
+	CampaignID      string  `json:"campaign_id"`
+	UserID          string  `json:"user_id"`
+	Username        string  `json:"username"`
+	Email           string  `json:"email"`
+	RewardTypeID    string  `json:"reward_type_id"`
+	RewardTypeName  string  `json:"reward_type_name"`
+	RewardTypeValue float64 `json:"reward_type_value"`
+	RewardTypeImage *string `json:"reward_type_image"`
+	FinalRank       int     `json:"final_rank"`
+	EmailSubject    string  `json:"email_subject"`
+	EmailBody       string  `json:"email_body"`
+	RetryCount      int     `json:"retry_count"`
+}
+
 // RewardCampaignFull includes email template fields not in the base RewardCampaign
 type RewardCampaignFull struct {
 	ID                      string          `json:"id"`
