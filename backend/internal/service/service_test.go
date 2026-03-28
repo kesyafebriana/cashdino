@@ -1150,6 +1150,25 @@ func TestUpdateCampaign_OverlappingRanges_ReturnsValidationError(t *testing.T) {
 	assert.ErrorContains(t, err, "overlapping rank ranges")
 }
 
+func TestUpdateCampaign_HasDistributions_ReturnsValidationError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+		return &model.RewardCampaignFull{ID: "camp-1", Status: "completed"}, nil
+	}
+	repo.getDistributions = func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
+		return []model.AdminDistributionRow{
+			{ID: "dist-1", UserID: "user-1", Status: "delivered", FinalRank: 1},
+		}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.UpdateCampaign(context.Background(), "camp-1", validCreateCampaignReq())
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "cannot update campaign that has reward distributions")
+}
+
 // =====================================================================
 // GetDistributions tests
 // =====================================================================

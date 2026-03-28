@@ -665,6 +665,15 @@ func (s *Service) UpdateCampaign(ctx context.Context, id string, req model.Creat
 		return nil, model.NotFoundErr("campaign not found")
 	}
 
+	// Prevent updating campaigns that already have distributions (would cascade-delete them)
+	dists, err := s.repo.GetDistributions(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("checking distributions: %w", err)
+	}
+	if len(dists) > 0 {
+		return nil, model.ValidationErr("cannot update campaign that has reward distributions")
+	}
+
 	err = s.repo.RunInTx(ctx, func(ctx context.Context) error {
 		// Delete existing reward_types
 		if err := s.repo.DeleteRewardTypesByCampaign(ctx, id); err != nil {

@@ -198,16 +198,6 @@ type LastWeekUserInfo struct {
 
 // Admin campaign request/response types
 
-type RewardDistribution struct {
-	ID           string     `json:"id"`
-	CampaignID   string     `json:"campaign_id"`
-	UserID       string     `json:"user_id"`
-	RewardTypeID string     `json:"reward_type_id"`
-	Status       string     `json:"status"`
-	DeliveredAt  *time.Time `json:"delivered_at"`
-	EmailSentAt  *time.Time `json:"email_sent_at"`
-}
-
 type CreateCampaignRequest struct {
 	ChallengeID            string                   `json:"challenge_id"`
 	Name                   string                   `json:"name"`
