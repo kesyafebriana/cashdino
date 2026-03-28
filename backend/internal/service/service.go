@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -21,6 +23,16 @@ type Repository interface {
 	GetCheckinDate(ctx context.Context, checkinID string) (time.Time, error)
 	InsertUserDailyCheckin(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error
 	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+
+	// Leaderboard queries
+	GetTop99Entries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
+	GetUserEntry(ctx context.Context, challengeID, userID string) (*model.LeaderboardEntry, error)
+	GetLastCompletedChallenge(ctx context.Context) (*model.WeeklyChallenge, error)
+	GetTop99Results(ctx context.Context, challengeID string) ([]model.WeeklyChallengeResult, error)
+	GetUserResult(ctx context.Context, challengeID, userID string) (*model.WeeklyChallengeResult, error)
+	GetCampaignByChallenge(ctx context.Context, challengeID string) (*model.RewardCampaign, error)
+	GetRewardTypesByIDs(ctx context.Context, ids []string) ([]model.RewardType, error)
+	GetResultRewards(ctx context.Context, challengeID string) (map[string][]model.RewardInfo, error)
 }
 
 var allowedEarnSources = map[string]bool{
@@ -65,7 +77,7 @@ func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*mod
 
 		challenge, err := s.repo.GetActiveChallenge(ctx)
 		if err != nil {
-			return fmt.Errorf("getting active challenge: %w", err)
+			return err
 		}
 
 		displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)
@@ -86,6 +98,248 @@ func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*mod
 	return &model.EarnGemsResponse{
 		UserID:     req.UserID,
 		WeeklyGems: weeklyGems,
+	}, nil
+}
+
+func (s *Service) GetBanner(ctx context.Context, userID string) (*model.BannerResponse, error) {
+	if userID == "" {
+		return nil, model.ValidationErr("user_id is required")
+	}
+
+	challenge, err := s.repo.GetActiveChallenge(ctx)
+	if err != nil {
+		if errors.Is(err, model.ErrNotFound) {
+			return nil, nil // signals "no active challenge"
+		}
+		return nil, err
+	}
+
+	top99, err := s.repo.GetTop99Entries(ctx, challenge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting top 99: %w", err)
+	}
+
+	resp := &model.BannerResponse{
+		ChallengeID: challenge.ID,
+		EndTime:     challenge.EndTime,
+		RankDisplay: "99+",
+	}
+
+	// Find user in top 99
+	for i, entry := range top99 {
+		if entry.UserID == userID {
+			rank := i + 1
+			resp.WeeklyGems = entry.WeeklyGems
+			resp.DisplayName = entry.DisplayName
+			resp.RankDisplay = fmt.Sprintf("#%d", rank)
+			if rank > 1 {
+				gap := top99[i-1].WeeklyGems - entry.WeeklyGems + 1
+				resp.GapToNext = &gap
+			}
+			return resp, nil
+		}
+	}
+
+	// User not in top 99 — get their entry directly
+	entry, err := s.repo.GetUserEntry(ctx, challenge.ID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("getting user entry: %w", err)
+	}
+	if entry != nil {
+		resp.WeeklyGems = entry.WeeklyGems
+		resp.DisplayName = entry.DisplayName
+	}
+	return resp, nil
+}
+
+func (s *Service) GetCurrentLeaderboard(ctx context.Context, userID string) (*model.CurrentLeaderboardResponse, error) {
+	if userID == "" {
+		return nil, model.ValidationErr("user_id is required")
+	}
+
+	challenge, err := s.repo.GetActiveChallenge(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	top99, err := s.repo.GetTop99Entries(ctx, challenge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting top 99: %w", err)
+	}
+
+	// Build leaderboard rows and find user
+	rows := make([]model.CurrentLeaderboardRow, len(top99))
+	var currentUser *model.CurrentUserInfo
+	for i, entry := range top99 {
+		rank := i + 1
+		rows[i] = model.CurrentLeaderboardRow{
+			Rank: rank, DisplayName: entry.DisplayName, WeeklyGems: entry.WeeklyGems,
+		}
+		if entry.UserID == userID {
+			cu := &model.CurrentUserInfo{
+				Rank: &rank, RankDisplay: fmt.Sprintf("%d", rank),
+				WeeklyGems: entry.WeeklyGems, DisplayName: entry.DisplayName,
+			}
+			if rank > 1 {
+				gap := top99[i-1].WeeklyGems - entry.WeeklyGems + 1
+				cu.GapToNext = &gap
+			}
+			currentUser = cu
+		}
+	}
+
+	// User not in top 99
+	if currentUser == nil {
+		entry, err := s.repo.GetUserEntry(ctx, challenge.ID, userID)
+		if err != nil {
+			return nil, fmt.Errorf("getting user entry: %w", err)
+		}
+		cu := &model.CurrentUserInfo{RankDisplay: "99+"}
+		if entry != nil {
+			cu.WeeklyGems = entry.WeeklyGems
+			cu.DisplayName = entry.DisplayName
+		}
+		currentUser = cu
+	}
+
+	resp := &model.CurrentLeaderboardResponse{
+		Challenge: model.ChallengeInfo{
+			ID: challenge.ID, StartTime: challenge.StartTime, EndTime: challenge.EndTime, Status: challenge.Status,
+		},
+		Leaderboard: rows,
+		CurrentUser: currentUser,
+	}
+
+	// Campaign info
+	campaign, err := s.repo.GetCampaignByChallenge(ctx, challenge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting campaign: %w", err)
+	}
+	if campaign != nil {
+		summary, err := s.buildCampaignSummary(ctx, campaign)
+		if err != nil {
+			return nil, fmt.Errorf("building campaign summary: %w", err)
+		}
+		resp.Campaign = summary
+	}
+
+	return resp, nil
+}
+
+func (s *Service) buildCampaignSummary(ctx context.Context, campaign *model.RewardCampaign) (*model.CampaignSummary, error) {
+	var rules []model.RewardRule
+	if err := json.Unmarshal(campaign.Rules, &rules); err != nil {
+		return nil, fmt.Errorf("parsing campaign rules: %w", err)
+	}
+
+	// Collect all reward type IDs
+	idSet := make(map[string]bool)
+	for _, rule := range rules {
+		for _, id := range rule.RewardTypeIDs {
+			idSet[id] = true
+		}
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+
+	rewardTypes, err := s.repo.GetRewardTypesByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("getting reward types: %w", err)
+	}
+	rtMap := make(map[string]model.RewardType, len(rewardTypes))
+	for _, rt := range rewardTypes {
+		rtMap[rt.ID] = rt
+	}
+
+	summaryRows := make([]model.RewardsSummaryRow, 0, len(rules))
+	for _, rule := range rules {
+		rewards := make([]model.RewardInfo, 0, len(rule.RewardTypeIDs))
+		for _, rtID := range rule.RewardTypeIDs {
+			if rt, ok := rtMap[rtID]; ok {
+				rewards = append(rewards, model.RewardInfo{
+					Name: rt.Name, Image: rt.Image, Value: rt.Value, Type: rt.Type,
+				})
+			}
+		}
+		summaryRows = append(summaryRows, model.RewardsSummaryRow{
+			RankFrom: rule.RankFrom, RankTo: rule.RankTo, Rewards: rewards,
+		})
+	}
+
+	return &model.CampaignSummary{
+		BannerImage:    campaign.BannerImage,
+		RewardsSummary: summaryRows,
+	}, nil
+}
+
+func (s *Service) GetLastWeekLeaderboard(ctx context.Context, userID string) (*model.LastWeekResponse, error) {
+	if userID == "" {
+		return nil, model.ValidationErr("user_id is required")
+	}
+
+	challenge, err := s.repo.GetLastCompletedChallenge(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting last completed challenge: %w", err)
+	}
+	if challenge == nil {
+		return &model.LastWeekResponse{Challenge: nil}, nil
+	}
+
+	results, err := s.repo.GetTop99Results(ctx, challenge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting top 99 results: %w", err)
+	}
+
+	rewards, err := s.repo.GetResultRewards(ctx, challenge.ID)
+	if err != nil {
+		return nil, fmt.Errorf("getting result rewards: %w", err)
+	}
+
+	rows := make([]model.LastWeekRow, len(results))
+	var currentUser *model.LastWeekUserInfo
+	for i, result := range results {
+		userRewards := rewards[result.UserID]
+		if userRewards == nil {
+			userRewards = []model.RewardInfo{}
+		}
+		rows[i] = model.LastWeekRow{
+			Rank: result.FinalRank, DisplayName: result.DisplayName,
+			FinalGems: result.FinalGems, Rewards: userRewards,
+		}
+		if result.UserID == userID {
+			rank := result.FinalRank
+			currentUser = &model.LastWeekUserInfo{
+				Rank: &rank, RankDisplay: fmt.Sprintf("%d", rank),
+				FinalGems: result.FinalGems, Rewards: userRewards,
+			}
+		}
+	}
+
+	// User not in top 99 results — check if they have a result at all
+	if currentUser == nil {
+		userResult, err := s.repo.GetUserResult(ctx, challenge.ID, userID)
+		if err != nil {
+			return nil, fmt.Errorf("getting user result: %w", err)
+		}
+		if userResult != nil {
+			userRewards := rewards[userResult.UserID]
+			if userRewards == nil {
+				userRewards = []model.RewardInfo{}
+			}
+			currentUser = &model.LastWeekUserInfo{
+				RankDisplay: "99+", FinalGems: userResult.FinalGems, Rewards: userRewards,
+			}
+		}
+	}
+
+	return &model.LastWeekResponse{
+		Challenge: &model.LastWeekChallengeInfo{
+			ID: challenge.ID, StartTime: challenge.StartTime, EndTime: challenge.EndTime,
+		},
+		Leaderboard: rows,
+		CurrentUser: currentUser,
 	}, nil
 }
 
@@ -152,7 +406,7 @@ func (s *Service) Checkin(ctx context.Context, req model.CheckinRequest) (*model
 
 		challenge, err := s.repo.GetActiveChallenge(ctx)
 		if err != nil {
-			return fmt.Errorf("getting active challenge: %w", err)
+			return err
 		}
 
 		displayName, err := s.repo.GenerateDisplayName(ctx, challenge.ID, user.Username)

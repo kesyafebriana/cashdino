@@ -12,6 +12,9 @@ import (
 type ServiceInterface interface {
 	EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error)
 	Checkin(ctx context.Context, req model.CheckinRequest) (*model.CheckinResponse, error)
+	GetBanner(ctx context.Context, userID string) (*model.BannerResponse, error)
+	GetCurrentLeaderboard(ctx context.Context, userID string) (*model.CurrentLeaderboardResponse, error)
+	GetLastWeekLeaderboard(ctx context.Context, userID string) (*model.LastWeekResponse, error)
 }
 
 type Handler struct {
