@@ -45,6 +45,21 @@ type Repository interface {
 	UpdateCampaign(ctx context.Context, campaign *model.RewardCampaignFull) error
 	DeleteRewardTypesByCampaign(ctx context.Context, campaignID string) error
 	GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
+
+	// Weekly reset methods
+	CompleteActiveChallenge(ctx context.Context) (string, error)
+	GetAllLeaderboardEntries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
+	InsertChallengeResult(ctx context.Context, result *model.WeeklyChallengeResult) error
+	InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) error
+	DecrementRewardTypeStock(ctx context.Context, rewardTypeID string) error
+	UpdateCampaignStatus(ctx context.Context, campaignID, status string) error
+	InsertWeeklyChallenge(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
+	GetRewardTypeByID(ctx context.Context, id string) (*model.RewardType, error)
+
+	// Email retry methods
+	GetFailedDistributions(ctx context.Context) ([]model.FailedDistribution, error)
+	UpdateDistributionDelivered(ctx context.Context, id string) error
+	IncrementDistributionRetryCount(ctx context.Context, id string) (int, error)
 }
 
 var allowedEarnSources = map[string]bool{
@@ -55,12 +70,13 @@ var allowedEarnSources = map[string]bool{
 }
 
 type Service struct {
-	repo Repository
-	now  func() time.Time
+	repo  Repository
+	email *EmailService
+	now   func() time.Time
 }
 
-func New(repo Repository) *Service {
-	return &Service{repo: repo, now: func() time.Time { return time.Now().UTC() }}
+func New(repo Repository, email *EmailService) *Service {
+	return &Service{repo: repo, email: email, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {

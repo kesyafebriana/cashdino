@@ -59,3 +59,11 @@ func (h *Handler) GetDistributions(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, rows)
 }
+
+func (h *Handler) ResetWeek(c echo.Context) error {
+	resp, err := h.svc.WeeklyReset(c.Request().Context())
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, resp)
+}

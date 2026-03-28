@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	cronpkg "github.com/kesyafebriana/cashdino/backend/internal/cron"
 	"github.com/kesyafebriana/cashdino/backend/internal/server"
 )
 
@@ -30,6 +31,13 @@ func main() {
 		log.Fatalf("failed to ping database: %v", err)
 	}
 	log.Println("connected to database")
+
+	// Create service for cron jobs (shares same wiring as server)
+	svc := server.NewService(pool)
+
+	// Start cron scheduler
+	c := cronpkg.Start(svc)
+	defer c.Stop()
 
 	// Create server
 	e := server.New(pool)

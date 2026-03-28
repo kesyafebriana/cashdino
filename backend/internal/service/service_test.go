@@ -46,6 +46,21 @@ type mockRepo struct {
 	updateCampaign           func(ctx context.Context, campaign *model.RewardCampaignFull) error
 	deleteRewardTypesByCampaign func(ctx context.Context, campaignID string) error
 	getDistributions         func(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
+
+	// Weekly reset methods
+	completeActiveChallenge       func(ctx context.Context) (string, error)
+	getAllLeaderboardEntries       func(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
+	insertChallengeResult         func(ctx context.Context, result *model.WeeklyChallengeResult) error
+	insertRewardDistribution      func(ctx context.Context, dist *model.RewardDistribution) error
+	decrementRewardTypeStock      func(ctx context.Context, rewardTypeID string) error
+	updateCampaignStatus          func(ctx context.Context, campaignID, status string) error
+	insertWeeklyChallenge         func(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
+	getRewardTypeByID             func(ctx context.Context, id string) (*model.RewardType, error)
+
+	// Email retry methods
+	getFailedDistributions        func(ctx context.Context) ([]model.FailedDistribution, error)
+	updateDistributionDelivered   func(ctx context.Context, id string) error
+	incrementDistributionRetryCount func(ctx context.Context, id string) (int, error)
 }
 
 func (m *mockRepo) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
@@ -135,6 +150,39 @@ func (m *mockRepo) DeleteRewardTypesByCampaign(ctx context.Context, campaignID s
 func (m *mockRepo) GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error) {
 	return m.getDistributions(ctx, campaignID)
 }
+func (m *mockRepo) CompleteActiveChallenge(ctx context.Context) (string, error) {
+	return m.completeActiveChallenge(ctx)
+}
+func (m *mockRepo) GetAllLeaderboardEntries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error) {
+	return m.getAllLeaderboardEntries(ctx, challengeID)
+}
+func (m *mockRepo) InsertChallengeResult(ctx context.Context, result *model.WeeklyChallengeResult) error {
+	return m.insertChallengeResult(ctx, result)
+}
+func (m *mockRepo) InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) error {
+	return m.insertRewardDistribution(ctx, dist)
+}
+func (m *mockRepo) DecrementRewardTypeStock(ctx context.Context, rewardTypeID string) error {
+	return m.decrementRewardTypeStock(ctx, rewardTypeID)
+}
+func (m *mockRepo) UpdateCampaignStatus(ctx context.Context, campaignID, status string) error {
+	return m.updateCampaignStatus(ctx, campaignID, status)
+}
+func (m *mockRepo) InsertWeeklyChallenge(ctx context.Context, startTime, endTime time.Time, status string) (string, error) {
+	return m.insertWeeklyChallenge(ctx, startTime, endTime, status)
+}
+func (m *mockRepo) GetRewardTypeByID(ctx context.Context, id string) (*model.RewardType, error) {
+	return m.getRewardTypeByID(ctx, id)
+}
+func (m *mockRepo) GetFailedDistributions(ctx context.Context) ([]model.FailedDistribution, error) {
+	return m.getFailedDistributions(ctx)
+}
+func (m *mockRepo) UpdateDistributionDelivered(ctx context.Context, id string) error {
+	return m.updateDistributionDelivered(ctx, id)
+}
+func (m *mockRepo) IncrementDistributionRetryCount(ctx context.Context, id string) (int, error) {
+	return m.incrementDistributionRetryCount(ctx, id)
+}
 
 // --- Helpers ---
 
@@ -223,6 +271,39 @@ func defaultMockRepo() *mockRepo {
 		getDistributions: func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
 			return nil, nil
 		},
+		completeActiveChallenge: func(_ context.Context) (string, error) {
+			return "challenge-1", nil
+		},
+		getAllLeaderboardEntries: func(_ context.Context, _ string) ([]model.LeaderboardEntry, error) {
+			return nil, nil
+		},
+		insertChallengeResult: func(_ context.Context, _ *model.WeeklyChallengeResult) error {
+			return nil
+		},
+		insertRewardDistribution: func(_ context.Context, _ *model.RewardDistribution) error {
+			return nil
+		},
+		decrementRewardTypeStock: func(_ context.Context, _ string) error {
+			return nil
+		},
+		updateCampaignStatus: func(_ context.Context, _, _ string) error {
+			return nil
+		},
+		insertWeeklyChallenge: func(_ context.Context, _, _ time.Time, _ string) (string, error) {
+			return "new-challenge-1", nil
+		},
+		getRewardTypeByID: func(_ context.Context, _ string) (*model.RewardType, error) {
+			return nil, nil
+		},
+		getFailedDistributions: func(_ context.Context) ([]model.FailedDistribution, error) {
+			return nil, nil
+		},
+		updateDistributionDelivered: func(_ context.Context, _ string) error {
+			return nil
+		},
+		incrementDistributionRetryCount: func(_ context.Context, _ string) (int, error) {
+			return 1, nil
+		},
 	}
 }
 
@@ -231,7 +312,13 @@ func fixedNow() time.Time {
 }
 
 func newTestService(repo *mockRepo) *Service {
-	s := New(repo)
+	s := New(repo, NewEmailService("", 0, "", ""))
+	s.now = fixedNow
+	return s
+}
+
+func newTestServiceWithEmail(repo *mockRepo, email *EmailService) *Service {
+	s := New(repo, email)
 	s.now = fixedNow
 	return s
 }
