@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+backend/bin/
+admin/.next/
+admin/out/
+mobile/.expo/
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
