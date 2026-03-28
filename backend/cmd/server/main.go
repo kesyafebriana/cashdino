@@ -32,7 +32,7 @@ func main() {
 	}
 	log.Println("connected to database")
 
-	// Create service for cron jobs (shares same wiring as server)
+	// Create shared service for both HTTP server and cron jobs
 	svc := server.NewService(pool)
 
 	// Start cron scheduler
@@ -40,7 +40,7 @@ func main() {
 	defer c.Stop()
 
 	// Create server
-	e := server.New(pool)
+	e := server.New(svc)
 
 	// Start server
 	port := os.Getenv("API_PORT")

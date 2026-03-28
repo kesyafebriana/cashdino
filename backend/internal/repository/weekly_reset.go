@@ -64,27 +64,32 @@ func (r *Repository) InsertChallengeResult(ctx context.Context, result *model.We
 	return nil
 }
 
-// InsertRewardDistribution inserts a row into reward_distributions.
-func (r *Repository) InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) error {
-	_, err := r.getDB(ctx).Exec(ctx,
+// InsertRewardDistribution inserts a row into reward_distributions and returns the new ID.
+func (r *Repository) InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) (string, error) {
+	var id string
+	err := r.getDB(ctx).QueryRow(ctx,
 		`INSERT INTO reward_distributions (campaign_id, user_id, reward_type_id, status, delivered_at, email_sent_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
 		dist.CampaignID, dist.UserID, dist.RewardTypeID, dist.Status, dist.DeliveredAt, dist.EmailSentAt,
-	)
+	).Scan(&id)
 	if err != nil {
-		return fmt.Errorf("inserting reward distribution: %w", err)
+		return "", fmt.Errorf("inserting reward distribution: %w", err)
 	}
-	return nil
+	return id, nil
 }
 
 // DecrementRewardTypeStock decreases the stock of a reward type by 1.
+// Returns ErrValidation if stock is already 0.
 func (r *Repository) DecrementRewardTypeStock(ctx context.Context, rewardTypeID string) error {
-	_, err := r.getDB(ctx).Exec(ctx,
-		`UPDATE reward_types SET stock = stock - 1 WHERE id = $1`,
+	tag, err := r.getDB(ctx).Exec(ctx,
+		`UPDATE reward_types SET stock = stock - 1 WHERE id = $1 AND stock > 0`,
 		rewardTypeID,
 	)
 	if err != nil {
 		return fmt.Errorf("decrementing reward type stock: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("decrementing reward type stock: %w", model.ValidationErr("reward type stock is 0"))
 	}
 	return nil
 }
@@ -143,7 +148,7 @@ func (r *Repository) GetFailedDistributions(ctx context.Context) ([]model.Failed
 		 JOIN reward_types rt ON rd.reward_type_id = rt.id
 		 JOIN reward_campaigns rc ON rd.campaign_id = rc.id
 		 JOIN weekly_challenge_results wcr ON wcr.challenge_id = rc.challenge_id AND wcr.user_id = rd.user_id
-		 WHERE rd.status = 'failed'`,
+		 WHERE rd.status = 'failed' AND rd.retry_count < 3`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("querying failed distributions: %w", err)
@@ -173,6 +178,18 @@ func (r *Repository) UpdateDistributionDelivered(ctx context.Context, id string)
 	)
 	if err != nil {
 		return fmt.Errorf("updating distribution delivered: %w", err)
+	}
+	return nil
+}
+
+// UpdateDistributionFailed marks a distribution as failed.
+func (r *Repository) UpdateDistributionFailed(ctx context.Context, id string) error {
+	_, err := r.getDB(ctx).Exec(ctx,
+		`UPDATE reward_distributions SET status = 'failed' WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("updating distribution failed: %w", err)
 	}
 	return nil
 }

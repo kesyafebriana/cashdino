@@ -32,7 +32,7 @@ func newEmailService() *service.EmailService {
 	return service.NewEmailService(host, port, user, pass)
 }
 
-func New(pool *pgxpool.Pool) *echo.Echo {
+func New(svc *service.Service) *echo.Echo {
 	e := echo.New()
 
 	// Middleware
@@ -41,7 +41,6 @@ func New(pool *pgxpool.Pool) *echo.Echo {
 	e.Use(middleware.CORS())
 
 	// Wire layers
-	svc := NewService(pool)
 	h := handler.New(svc)
 
 	// Routes

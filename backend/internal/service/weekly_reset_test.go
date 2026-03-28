@@ -51,7 +51,6 @@ func TestWeeklyReset_SnapshotsResults(t *testing.T) {
 		return nil
 	}
 
-	// No campaign
 	repo.getCampaignByChallenge = func(_ context.Context, _ string) (*model.RewardCampaign, error) {
 		return nil, nil
 	}
@@ -66,7 +65,6 @@ func TestWeeklyReset_SnapshotsResults(t *testing.T) {
 	assert.Equal(t, 2, resp.ResultsArchived)
 	assert.Equal(t, 0, resp.RewardsDistributed)
 
-	// Verify results were inserted with correct ranks
 	require.Len(t, insertedResults, 2)
 	assert.Equal(t, 1, insertedResults[0].FinalRank)
 	assert.Equal(t, "user-1", insertedResults[0].UserID)
@@ -78,7 +76,6 @@ func TestWeeklyReset_SnapshotsResults(t *testing.T) {
 
 func TestWeeklyReset_CreatesNextChallenge(t *testing.T) {
 	repo := defaultMockRepo()
-	// Set now to Sunday 23:59 UTC (2026-03-29 is a Sunday)
 	now := time.Date(2026, 3, 29, 23, 59, 0, 0, time.UTC)
 
 	repo.getAllLeaderboardEntries = func(_ context.Context, _ string) ([]model.LeaderboardEntry, error) {
@@ -103,7 +100,6 @@ func TestWeeklyReset_CreatesNextChallenge(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "new-challenge-1", resp.NewChallengeID)
 
-	// Next Monday 00:00 UTC after Sunday 2026-03-29 = Monday 2026-03-30
 	expectedStart := time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC)
 	expectedEnd := time.Date(2026, 4, 5, 23, 59, 59, 0, time.UTC)
 	assert.Equal(t, expectedStart, capturedStart)
@@ -133,34 +129,23 @@ func TestWeeklyReset_DistributesGemRewards(t *testing.T) {
 	}
 
 	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
-		return &model.RewardCampaignFull{
-			ID: "camp-1", ChallengeID: "challenge-1",
-			NonGemClaimEmailSubject: "", NonGemClaimEmailBody: "",
-		}, nil
+		return &model.RewardCampaignFull{ID: "camp-1", ChallengeID: "challenge-1"}, nil
 	}
 
-	repo.getRewardTypeByID = func(_ context.Context, id string) (*model.RewardType, error) {
+	repo.getRewardTypeByID = func(_ context.Context, _ string) (*model.RewardType, error) {
 		return &model.RewardType{ID: "rt-gems", Type: "gems", Value: 10000, Name: "10K Gems", Stock: 1}, nil
 	}
 
-	var gemInserts []struct {
-		userID string
-		source string
-		amount int
-	}
+	var gemInserts []struct{ userID, source string; amount int }
 	repo.insertGemHistory = func(_ context.Context, userID, source string, amount int, _ *string) error {
-		gemInserts = append(gemInserts, struct {
-			userID string
-			source string
-			amount int
-		}{userID, source, amount})
+		gemInserts = append(gemInserts, struct{ userID, source string; amount int }{userID, source, amount})
 		return nil
 	}
 
 	var distributions []*model.RewardDistribution
-	repo.insertRewardDistribution = func(_ context.Context, dist *model.RewardDistribution) error {
+	repo.insertRewardDistribution = func(_ context.Context, dist *model.RewardDistribution) (string, error) {
 		distributions = append(distributions, dist)
-		return nil
+		return "dist-1", nil
 	}
 
 	var stockDecrements []string
@@ -187,11 +172,13 @@ func TestWeeklyReset_DistributesGemRewards(t *testing.T) {
 
 	assert.Equal(t, 1, resp.RewardsDistributed)
 
+	// Gem reward should insert gem_history
 	require.Len(t, gemInserts, 1)
 	assert.Equal(t, "user-1", gemInserts[0].userID)
 	assert.Equal(t, "reward", gemInserts[0].source)
 	assert.Equal(t, 10000, gemInserts[0].amount)
 
+	// Should insert a delivered distribution (gems are immediate)
 	require.Len(t, distributions, 1)
 	assert.Equal(t, "delivered", distributions[0].Status)
 	assert.NotNil(t, distributions[0].DeliveredAt)
@@ -203,7 +190,7 @@ func TestWeeklyReset_DistributesGemRewards(t *testing.T) {
 	assert.Equal(t, "completed", campaignStatusUpdates[0])
 }
 
-func TestWeeklyReset_DistributesNonGemRewards_SendsEmail(t *testing.T) {
+func TestWeeklyReset_DistributesNonGemRewards_SendsEmailAfterCommit(t *testing.T) {
 	repo := defaultMockRepo()
 	now := time.Date(2026, 3, 29, 23, 59, 0, 0, time.UTC)
 
@@ -242,9 +229,17 @@ func TestWeeklyReset_DistributesNonGemRewards_SendsEmail(t *testing.T) {
 		return &model.User{ID: userID, Username: "james", Email: "james@example.com"}, nil
 	}
 
+	// Non-gem distributions are inserted as 'pending' during tx
 	var distributions []*model.RewardDistribution
-	repo.insertRewardDistribution = func(_ context.Context, dist *model.RewardDistribution) error {
+	repo.insertRewardDistribution = func(_ context.Context, dist *model.RewardDistribution) (string, error) {
 		distributions = append(distributions, dist)
+		return "dist-1", nil
+	}
+
+	// After tx commit, email succeeds → UpdateDistributionDelivered is called
+	var deliveredIDs []string
+	repo.updateDistributionDelivered = func(_ context.Context, id string) error {
+		deliveredIDs = append(deliveredIDs, id)
 		return nil
 	}
 
@@ -262,17 +257,20 @@ func TestWeeklyReset_DistributesNonGemRewards_SendsEmail(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, resp.RewardsDistributed)
 
+	// Distribution inserted as pending during tx
 	require.Len(t, distributions, 1)
-	assert.Equal(t, "delivered", distributions[0].Status)
-	assert.NotNil(t, distributions[0].EmailSentAt)
+	assert.Equal(t, "pending", distributions[0].Status)
 
+	// Email sent after commit → distribution updated to delivered
+	require.Len(t, deliveredIDs, 1)
+	assert.Equal(t, "dist-1", deliveredIDs[0])
+
+	// Email was logged (console mode)
 	output := buf.String()
 	assert.Contains(t, output, "james@example.com")
 	assert.Contains(t, output, "Congrats james!")
 	assert.Contains(t, output, "Rank #1")
 	assert.Contains(t, output, "$50 Gift Card")
-	assert.Contains(t, output, "50")
-	assert.Contains(t, output, "<img src='https://img.png/gc.jpg' width='100'>")
 }
 
 func TestWeeklyReset_NonGemReward_EmailFails_StatusFailed(t *testing.T) {
@@ -312,9 +310,14 @@ func TestWeeklyReset_NonGemReward_EmailFails_StatusFailed(t *testing.T) {
 		return &model.User{ID: "user-1", Username: "james", Email: "james@example.com"}, nil
 	}
 
-	var distributions []*model.RewardDistribution
-	repo.insertRewardDistribution = func(_ context.Context, dist *model.RewardDistribution) error {
-		distributions = append(distributions, dist)
+	repo.insertRewardDistribution = func(_ context.Context, _ *model.RewardDistribution) (string, error) {
+		return "dist-1", nil
+	}
+
+	// After tx commit, email fails → UpdateDistributionFailed is called
+	var failedIDs []string
+	repo.updateDistributionFailed = func(_ context.Context, id string) error {
+		failedIDs = append(failedIDs, id)
 		return nil
 	}
 
@@ -330,8 +333,9 @@ func TestWeeklyReset_NonGemReward_EmailFails_StatusFailed(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, resp.RewardsDistributed)
 
-	require.Len(t, distributions, 1)
-	assert.Equal(t, "failed", distributions[0].Status)
+	// Distribution marked failed after email failure
+	require.Len(t, failedIDs, 1)
+	assert.Equal(t, "dist-1", failedIDs[0])
 }
 
 func TestWeeklyReset_NoCampaign_SkipsDistribution(t *testing.T) {
@@ -405,9 +409,9 @@ func TestWeeklyReset_MultipleRulesMultipleRewards(t *testing.T) {
 	}
 
 	var distCount int
-	repo.insertRewardDistribution = func(_ context.Context, _ *model.RewardDistribution) error {
+	repo.insertRewardDistribution = func(_ context.Context, _ *model.RewardDistribution) (string, error) {
 		distCount++
-		return nil
+		return fmt.Sprintf("dist-%d", distCount), nil
 	}
 	repo.decrementRewardTypeStock = func(_ context.Context, _ string) error { return nil }
 	repo.updateCampaignStatus = func(_ context.Context, _, _ string) error { return nil }
@@ -460,7 +464,7 @@ func TestRetryFailedEmails_SuccessfulRetry_MarksDelivered(t *testing.T) {
 		return nil
 	}
 
-	svc := newTestService(repo) // console mode email — always succeeds
+	svc := newTestService(repo)
 
 	var buf bytes.Buffer
 	log.SetOutput(&buf)

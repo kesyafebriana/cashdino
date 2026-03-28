@@ -50,9 +50,10 @@ type Repository interface {
 	CompleteActiveChallenge(ctx context.Context) (string, error)
 	GetAllLeaderboardEntries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
 	InsertChallengeResult(ctx context.Context, result *model.WeeklyChallengeResult) error
-	InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) error
+	InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) (string, error)
 	DecrementRewardTypeStock(ctx context.Context, rewardTypeID string) error
 	UpdateCampaignStatus(ctx context.Context, campaignID, status string) error
+	UpdateDistributionFailed(ctx context.Context, id string) error
 	InsertWeeklyChallenge(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
 	GetRewardTypeByID(ctx context.Context, id string) (*model.RewardType, error)
 

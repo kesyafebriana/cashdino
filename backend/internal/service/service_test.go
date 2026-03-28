@@ -51,7 +51,8 @@ type mockRepo struct {
 	completeActiveChallenge       func(ctx context.Context) (string, error)
 	getAllLeaderboardEntries       func(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
 	insertChallengeResult         func(ctx context.Context, result *model.WeeklyChallengeResult) error
-	insertRewardDistribution      func(ctx context.Context, dist *model.RewardDistribution) error
+	insertRewardDistribution      func(ctx context.Context, dist *model.RewardDistribution) (string, error)
+	updateDistributionFailed      func(ctx context.Context, id string) error
 	decrementRewardTypeStock      func(ctx context.Context, rewardTypeID string) error
 	updateCampaignStatus          func(ctx context.Context, campaignID, status string) error
 	insertWeeklyChallenge         func(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
@@ -159,8 +160,11 @@ func (m *mockRepo) GetAllLeaderboardEntries(ctx context.Context, challengeID str
 func (m *mockRepo) InsertChallengeResult(ctx context.Context, result *model.WeeklyChallengeResult) error {
 	return m.insertChallengeResult(ctx, result)
 }
-func (m *mockRepo) InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) error {
+func (m *mockRepo) InsertRewardDistribution(ctx context.Context, dist *model.RewardDistribution) (string, error) {
 	return m.insertRewardDistribution(ctx, dist)
+}
+func (m *mockRepo) UpdateDistributionFailed(ctx context.Context, id string) error {
+	return m.updateDistributionFailed(ctx, id)
 }
 func (m *mockRepo) DecrementRewardTypeStock(ctx context.Context, rewardTypeID string) error {
 	return m.decrementRewardTypeStock(ctx, rewardTypeID)
@@ -280,7 +284,10 @@ func defaultMockRepo() *mockRepo {
 		insertChallengeResult: func(_ context.Context, _ *model.WeeklyChallengeResult) error {
 			return nil
 		},
-		insertRewardDistribution: func(_ context.Context, _ *model.RewardDistribution) error {
+		insertRewardDistribution: func(_ context.Context, _ *model.RewardDistribution) (string, error) {
+			return "dist-new", nil
+		},
+		updateDistributionFailed: func(_ context.Context, _ string) error {
 			return nil
 		},
 		decrementRewardTypeStock: func(_ context.Context, _ string) error {
