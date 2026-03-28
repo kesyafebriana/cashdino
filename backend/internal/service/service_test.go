@@ -35,6 +35,17 @@ type mockRepo struct {
 	getCampaignByChallenge  func(ctx context.Context, challengeID string) (*model.RewardCampaign, error)
 	getRewardTypesByIDs     func(ctx context.Context, ids []string) ([]model.RewardType, error)
 	getResultRewards        func(ctx context.Context, challengeID string) (map[string][]model.RewardInfo, error)
+
+	// Admin campaign methods
+	listCampaigns            func(ctx context.Context) ([]model.AdminCampaignListItem, error)
+	getCampaignByID          func(ctx context.Context, id string) (*model.RewardCampaignFull, error)
+	getRewardTypesByCampaign func(ctx context.Context, campaignID string) ([]model.RewardType, error)
+	createCampaign           func(ctx context.Context, campaign *model.RewardCampaignFull) (string, error)
+	createRewardType         func(ctx context.Context, rt *model.RewardType) (string, error)
+	updateCampaignRules      func(ctx context.Context, campaignID string, rules json.RawMessage) error
+	updateCampaign           func(ctx context.Context, campaign *model.RewardCampaignFull) error
+	deleteRewardTypesByCampaign func(ctx context.Context, campaignID string) error
+	getDistributions         func(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
 }
 
 func (m *mockRepo) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
@@ -97,6 +108,33 @@ func (m *mockRepo) GetRewardTypesByIDs(ctx context.Context, ids []string) ([]mod
 func (m *mockRepo) GetResultRewards(ctx context.Context, challengeID string) (map[string][]model.RewardInfo, error) {
 	return m.getResultRewards(ctx, challengeID)
 }
+func (m *mockRepo) ListCampaigns(ctx context.Context) ([]model.AdminCampaignListItem, error) {
+	return m.listCampaigns(ctx)
+}
+func (m *mockRepo) GetCampaignByID(ctx context.Context, id string) (*model.RewardCampaignFull, error) {
+	return m.getCampaignByID(ctx, id)
+}
+func (m *mockRepo) GetRewardTypesByCampaign(ctx context.Context, campaignID string) ([]model.RewardType, error) {
+	return m.getRewardTypesByCampaign(ctx, campaignID)
+}
+func (m *mockRepo) CreateCampaign(ctx context.Context, campaign *model.RewardCampaignFull) (string, error) {
+	return m.createCampaign(ctx, campaign)
+}
+func (m *mockRepo) CreateRewardType(ctx context.Context, rt *model.RewardType) (string, error) {
+	return m.createRewardType(ctx, rt)
+}
+func (m *mockRepo) UpdateCampaignRules(ctx context.Context, campaignID string, rules json.RawMessage) error {
+	return m.updateCampaignRules(ctx, campaignID, rules)
+}
+func (m *mockRepo) UpdateCampaign(ctx context.Context, campaign *model.RewardCampaignFull) error {
+	return m.updateCampaign(ctx, campaign)
+}
+func (m *mockRepo) DeleteRewardTypesByCampaign(ctx context.Context, campaignID string) error {
+	return m.deleteRewardTypesByCampaign(ctx, campaignID)
+}
+func (m *mockRepo) GetDistributions(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error) {
+	return m.getDistributions(ctx, campaignID)
+}
 
 // --- Helpers ---
 
@@ -156,6 +194,33 @@ func defaultMockRepo() *mockRepo {
 			return nil, nil
 		},
 		getResultRewards: func(_ context.Context, _ string) (map[string][]model.RewardInfo, error) {
+			return nil, nil
+		},
+		listCampaigns: func(_ context.Context) ([]model.AdminCampaignListItem, error) {
+			return nil, nil
+		},
+		getCampaignByID: func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+			return nil, nil
+		},
+		getRewardTypesByCampaign: func(_ context.Context, _ string) ([]model.RewardType, error) {
+			return nil, nil
+		},
+		createCampaign: func(_ context.Context, _ *model.RewardCampaignFull) (string, error) {
+			return "camp-new", nil
+		},
+		createRewardType: func(_ context.Context, _ *model.RewardType) (string, error) {
+			return "rt-new", nil
+		},
+		updateCampaignRules: func(_ context.Context, _ string, _ json.RawMessage) error {
+			return nil
+		},
+		updateCampaign: func(_ context.Context, _ *model.RewardCampaignFull) error {
+			return nil
+		},
+		deleteRewardTypesByCampaign: func(_ context.Context, _ string) error {
+			return nil
+		},
+		getDistributions: func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
 			return nil, nil
 		},
 	}
@@ -693,3 +758,449 @@ func TestGetLastWeek_EmptyUserID_ReturnsValidationError(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// =====================================================================
+// ListCampaigns tests
+// =====================================================================
+
+func TestListCampaigns_ReturnsCampaigns(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.listCampaigns = func(_ context.Context) ([]model.AdminCampaignListItem, error) {
+		return []model.AdminCampaignListItem{
+			{
+				ID: "camp-1", ChallengeID: "ch-1", Name: "Week 14", Status: "active",
+				ChallengeStart: fixedNow().AddDate(0, 0, -5), ChallengeEnd: testEndTime,
+				RewardTypesCount: 3, TotalStock: 11,
+			},
+			{
+				ID: "camp-2", ChallengeID: "ch-0", Name: "Week 13", Status: "completed",
+				ChallengeStart: fixedNow().AddDate(0, 0, -12), ChallengeEnd: fixedNow().AddDate(0, 0, -6),
+				RewardTypesCount: 2, TotalStock: 6,
+			},
+		}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.ListCampaigns(context.Background())
+
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "camp-1", result[0].ID)
+	assert.Equal(t, 3, result[0].RewardTypesCount)
+	assert.Equal(t, 11, result[0].TotalStock)
+	assert.Equal(t, "camp-2", result[1].ID)
+}
+
+func TestListCampaigns_Empty_ReturnsEmptySlice(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.listCampaigns = func(_ context.Context) ([]model.AdminCampaignListItem, error) {
+		return []model.AdminCampaignListItem{}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.ListCampaigns(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, result)
+}
+
+func TestListCampaigns_RepoError_ReturnsError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.listCampaigns = func(_ context.Context) ([]model.AdminCampaignListItem, error) {
+		return nil, fmt.Errorf("db error")
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.ListCampaigns(context.Background())
+
+	assert.Nil(t, result)
+	assert.ErrorContains(t, err, "listing campaigns")
+}
+
+// =====================================================================
+// GetCampaign tests
+// =====================================================================
+
+func TestGetCampaign_ReturnsCampaignWithRewardTypesAndRules(t *testing.T) {
+	repo := defaultMockRepo()
+	rules, _ := json.Marshal([]model.RewardRule{
+		{RankFrom: 1, RankTo: 1, RewardTypeIDs: []string{"rt-1", "rt-2"}},
+		{RankFrom: 2, RankTo: 5, RewardTypeIDs: []string{"rt-2"}},
+	})
+	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+		return &model.RewardCampaignFull{
+			ID: "camp-1", ChallengeID: "ch-1", Name: "Week 14", BannerImage: "https://img.png",
+			Rules: rules, Status: "active",
+			NonGemClaimEmailSubject: "You won!", NonGemClaimEmailBody: "Hi {{username}}",
+		}, nil
+	}
+	repo.getRewardTypesByCampaign = func(_ context.Context, _ string) ([]model.RewardType, error) {
+		return []model.RewardType{
+			{ID: "rt-1", CampaignID: "camp-1", Name: "10K Gems", Type: "gems", Value: 10000, Stock: 1},
+			{ID: "rt-2", CampaignID: "camp-1", Name: "Gift Card A", Type: "gift_card", Value: 10, Image: strPtr("https://gc.png"), Stock: 5},
+		}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.GetCampaign(context.Background(), "camp-1")
+
+	require.NoError(t, err)
+	assert.Equal(t, "camp-1", result.ID)
+	assert.Equal(t, "You won!", result.NonGemClaimEmailSubject)
+	assert.Equal(t, "Hi {{username}}", result.NonGemClaimEmailBody)
+	require.Len(t, result.RewardTypes, 2)
+	assert.Equal(t, "10K Gems", result.RewardTypes[0].Name)
+	require.Len(t, result.Rules, 2)
+	assert.Equal(t, 1, result.Rules[0].RankFrom)
+	assert.Equal(t, 1, result.Rules[0].RankTo)
+	require.Len(t, result.Rules[0].RewardNames, 2)
+	assert.Equal(t, "10K Gems", result.Rules[0].RewardNames[0])
+	assert.Equal(t, "Gift Card A", result.Rules[0].RewardNames[1])
+}
+
+func TestGetCampaign_EmptyID_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	result, err := svc.GetCampaign(context.Background(), "")
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+}
+
+func TestGetCampaign_NotFound_ReturnsNotFoundError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+		return nil, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.GetCampaign(context.Background(), "nonexistent")
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrNotFound))
+}
+
+// =====================================================================
+// CreateCampaign tests
+// =====================================================================
+
+func validCreateCampaignReq() model.CreateCampaignRequest {
+	return model.CreateCampaignRequest{
+		ChallengeID: "ch-1",
+		Name:        "Week 14 — Easter",
+		BannerImage: "https://img.png",
+		RewardTypes: []model.CreateRewardTypeInput{
+			{Name: "10K Gems", Type: "gems", Value: 10000, Stock: 1},
+			{Name: "Gift Card A", Type: "gift_card", Value: 10, Image: strPtr("https://gc.png"), Stock: 5},
+		},
+		Rules: []model.CreateCampaignRuleInput{
+			{RankFrom: 1, RankTo: 1, RewardTypeIndexes: []int{0, 1}},
+			{RankFrom: 2, RankTo: 5, RewardTypeIndexes: []int{1}},
+		},
+		NonGemClaimEmailSubject: "You won!",
+		NonGemClaimEmailBody:    "Hi {{username}}, you placed #{{rank}}...",
+	}
+}
+
+func TestCreateCampaign_ValidRequest_ReturnsCampaign(t *testing.T) {
+	repo := defaultMockRepo()
+	rtIndex := 0
+	repo.createRewardType = func(_ context.Context, _ *model.RewardType) (string, error) {
+		rtIndex++
+		return fmt.Sprintf("rt-%d", rtIndex), nil
+	}
+	repo.createCampaign = func(_ context.Context, _ *model.RewardCampaignFull) (string, error) {
+		return "camp-new", nil
+	}
+	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+		rules, _ := json.Marshal([]model.RewardRule{
+			{RankFrom: 1, RankTo: 1, RewardTypeIDs: []string{"rt-1", "rt-2"}},
+			{RankFrom: 2, RankTo: 5, RewardTypeIDs: []string{"rt-2"}},
+		})
+		return &model.RewardCampaignFull{
+			ID: "camp-new", ChallengeID: "ch-1", Name: "Week 14 — Easter", BannerImage: "https://img.png",
+			Rules: rules, Status: "draft",
+			NonGemClaimEmailSubject: "You won!", NonGemClaimEmailBody: "Hi {{username}}, you placed #{{rank}}...",
+		}, nil
+	}
+	repo.getRewardTypesByCampaign = func(_ context.Context, _ string) ([]model.RewardType, error) {
+		return []model.RewardType{
+			{ID: "rt-1", CampaignID: "camp-new", Name: "10K Gems", Type: "gems", Value: 10000, Stock: 1},
+			{ID: "rt-2", CampaignID: "camp-new", Name: "Gift Card A", Type: "gift_card", Value: 10, Image: strPtr("https://gc.png"), Stock: 5},
+		}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.CreateCampaign(context.Background(), validCreateCampaignReq())
+
+	require.NoError(t, err)
+	assert.Equal(t, "camp-new", result.ID)
+	assert.Equal(t, "Week 14 — Easter", result.Name)
+}
+
+func TestCreateCampaign_RankFromGreaterThanRankTo_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.Rules = []model.CreateCampaignRuleInput{
+		{RankFrom: 5, RankTo: 1, RewardTypeIndexes: []int{0}},
+	}
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "rank_from must be <= rank_to")
+}
+
+func TestCreateCampaign_RankFromLessThan1_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.Rules = []model.CreateCampaignRuleInput{
+		{RankFrom: 0, RankTo: 5, RewardTypeIndexes: []int{0}},
+	}
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "rank_from must be >= 1")
+}
+
+func TestCreateCampaign_OverlappingRanges_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.Rules = []model.CreateCampaignRuleInput{
+		{RankFrom: 1, RankTo: 5, RewardTypeIndexes: []int{0}},
+		{RankFrom: 3, RankTo: 10, RewardTypeIndexes: []int{1}},
+	}
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "overlapping rank ranges")
+}
+
+func TestCreateCampaign_StockExceeded_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	// Gift Card A (stock 5) used in rank 1-1 (1 user) + rank 2-10 (9 users) = 10 total > 5
+	req.Rules = []model.CreateCampaignRuleInput{
+		{RankFrom: 1, RankTo: 1, RewardTypeIndexes: []int{0, 1}},
+		{RankFrom: 2, RankTo: 10, RewardTypeIndexes: []int{1}},
+	}
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "Gift Card A: need 10, stock is 5")
+}
+
+func TestCreateCampaign_InvalidRewardTypeIndex_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.Rules = []model.CreateCampaignRuleInput{
+		{RankFrom: 1, RankTo: 1, RewardTypeIndexes: []int{0, 5}},
+	}
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "invalid reward_type_index")
+}
+
+func TestCreateCampaign_EmptyChallengeID_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.ChallengeID = ""
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "challenge_id is required")
+}
+
+func TestCreateCampaign_EmptyName_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.Name = ""
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "name is required")
+}
+
+func TestCreateCampaign_NoRewardTypes_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.RewardTypes = nil
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "at least one reward_type is required")
+}
+
+func TestCreateCampaign_NoRules_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+	req := validCreateCampaignReq()
+	req.Rules = nil
+
+	result, err := svc.CreateCampaign(context.Background(), req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "at least one rule is required")
+}
+
+func TestCreateCampaign_TransactionFails_ReturnsError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.runInTx = func(_ context.Context, _ func(ctx context.Context) error) error {
+		return fmt.Errorf("connection pool exhausted")
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.CreateCampaign(context.Background(), validCreateCampaignReq())
+
+	assert.Nil(t, result)
+	assert.ErrorContains(t, err, "connection pool exhausted")
+}
+
+// =====================================================================
+// UpdateCampaign tests
+// =====================================================================
+
+func TestUpdateCampaign_ValidRequest_ReturnsCampaign(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.getCampaignByID = func(_ context.Context, id string) (*model.RewardCampaignFull, error) {
+		if id == "camp-1" {
+			rules, _ := json.Marshal([]model.RewardRule{
+				{RankFrom: 1, RankTo: 1, RewardTypeIDs: []string{"rt-1", "rt-2"}},
+				{RankFrom: 2, RankTo: 5, RewardTypeIDs: []string{"rt-2"}},
+			})
+			return &model.RewardCampaignFull{
+				ID: "camp-1", ChallengeID: "ch-1", Name: "Week 14 — Easter", BannerImage: "https://img.png",
+				Rules: rules, Status: "draft",
+				NonGemClaimEmailSubject: "You won!", NonGemClaimEmailBody: "Hi {{username}}",
+			}, nil
+		}
+		return nil, nil
+	}
+	rtIndex := 0
+	repo.createRewardType = func(_ context.Context, _ *model.RewardType) (string, error) {
+		rtIndex++
+		return fmt.Sprintf("rt-new-%d", rtIndex), nil
+	}
+	repo.getRewardTypesByCampaign = func(_ context.Context, _ string) ([]model.RewardType, error) {
+		return []model.RewardType{
+			{ID: "rt-new-1", CampaignID: "camp-1", Name: "10K Gems", Type: "gems", Value: 10000, Stock: 1},
+			{ID: "rt-new-2", CampaignID: "camp-1", Name: "Gift Card A", Type: "gift_card", Value: 10, Image: strPtr("https://gc.png"), Stock: 5},
+		}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.UpdateCampaign(context.Background(), "camp-1", validCreateCampaignReq())
+
+	require.NoError(t, err)
+	assert.Equal(t, "camp-1", result.ID)
+}
+
+func TestUpdateCampaign_NotFound_ReturnsNotFoundError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+		return nil, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.UpdateCampaign(context.Background(), "nonexistent", validCreateCampaignReq())
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrNotFound))
+}
+
+func TestUpdateCampaign_EmptyID_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+
+	result, err := svc.UpdateCampaign(context.Background(), "", validCreateCampaignReq())
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+}
+
+func TestUpdateCampaign_OverlappingRanges_ReturnsValidationError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.getCampaignByID = func(_ context.Context, _ string) (*model.RewardCampaignFull, error) {
+		return &model.RewardCampaignFull{ID: "camp-1", Status: "draft"}, nil
+	}
+	svc := newTestService(repo)
+	req := validCreateCampaignReq()
+	req.Rules = []model.CreateCampaignRuleInput{
+		{RankFrom: 1, RankTo: 5, RewardTypeIndexes: []int{0}},
+		{RankFrom: 3, RankTo: 10, RewardTypeIndexes: []int{1}},
+	}
+
+	result, err := svc.UpdateCampaign(context.Background(), "camp-1", req)
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+	assert.ErrorContains(t, err, "overlapping rank ranges")
+}
+
+// =====================================================================
+// GetDistributions tests
+// =====================================================================
+
+func TestGetDistributions_ReturnsDistributions(t *testing.T) {
+	repo := defaultMockRepo()
+	delivered := fixedNow()
+	repo.getDistributions = func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
+		return []model.AdminDistributionRow{
+			{
+				ID: "dist-1", UserID: "user-1", DisplayName: "ja****s", MaskedEmail: "ja****@example.com",
+				RewardName: "10K Gems", RewardType: "gems", RewardValue: 10000,
+				Status: "delivered", DeliveredAt: &delivered, FinalRank: 1,
+			},
+			{
+				ID: "dist-2", UserID: "user-2", DisplayName: "ke****m", MaskedEmail: "ke****@example.com",
+				RewardName: "Gift Card A", RewardType: "gift_card", RewardValue: 10, RewardImage: strPtr("https://gc.png"),
+				Status: "delivered", DeliveredAt: &delivered, FinalRank: 2,
+			},
+		}, nil
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.GetDistributions(context.Background(), "camp-1")
+
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+	assert.Equal(t, "dist-1", result[0].ID)
+	assert.Equal(t, 1, result[0].FinalRank)
+	assert.Equal(t, "dist-2", result[1].ID)
+	assert.Equal(t, 2, result[1].FinalRank)
+}
+
+func TestGetDistributions_EmptyID_ReturnsValidationError(t *testing.T) {
+	svc := newTestService(defaultMockRepo())
+
+	result, err := svc.GetDistributions(context.Background(), "")
+
+	assert.Nil(t, result)
+	assert.True(t, errors.Is(err, model.ErrValidation))
+}
+
+func TestGetDistributions_RepoError_ReturnsError(t *testing.T) {
+	repo := defaultMockRepo()
+	repo.getDistributions = func(_ context.Context, _ string) ([]model.AdminDistributionRow, error) {
+		return nil, fmt.Errorf("db error")
+	}
+	svc := newTestService(repo)
+
+	result, err := svc.GetDistributions(context.Background(), "camp-1")
+
+	assert.Nil(t, result)
+	assert.ErrorContains(t, err, "getting distributions")
+}
