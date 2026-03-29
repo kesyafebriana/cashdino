@@ -90,7 +90,9 @@ export default function LeaderboardScreen() {
     setThisWeekError(null);
     try {
       const resp = await fetchCurrentLeaderboard(currentUser.id);
-      const storageKey = `leaderboard_ranks:${currentUser.id}:${resp.challenge.id}`;
+      const lbPrefix =
+        process.env.EXPO_PUBLIC_STORAGE_KEY_LEADERBOARD_RANKS || "leaderboard_ranks";
+      const storageKey = `${lbPrefix}:${currentUser.id}:${resp.challenge.id}`;
       const stored = await AsyncStorage.getItem(storageKey);
       const previous: Record<string, number> | null = stored
         ? JSON.parse(stored)

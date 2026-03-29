@@ -53,12 +53,15 @@ export default function HomeScreen() {
     streak: number;
   } | null>(null);
 
+  const checkinPrefix =
+    process.env.EXPO_PUBLIC_STORAGE_KEY_CHECKIN || "checkin";
+
   const todayKey = useCallback(
     (userId: string) => {
       const d = new Date().toISOString().slice(0, 10);
-      return `checkin:${userId}:${d}`;
+      return `${checkinPrefix}:${userId}:${d}`;
     },
-    []
+    [checkinPrefix]
   );
 
   // Check if already claimed today (from local storage)

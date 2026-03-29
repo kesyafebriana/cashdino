@@ -9,7 +9,8 @@ import { StepPrivacy } from "./StepPrivacy";
 import { useUser } from "@/contexts/UserContext";
 
 const APP_VERSION = require("../../app.json").expo.version;
-const STORAGE_KEY_PREFIX = "onboarding_shown_version";
+const STORAGE_KEY_PREFIX =
+  process.env.EXPO_PUBLIC_STORAGE_KEY_ONBOARDING || "onboarding_shown_version";
 const TOTAL_STEPS = 3;
 
 export function OnboardingModal() {
