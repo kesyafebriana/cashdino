@@ -22,7 +22,8 @@
       "package": "com.cashdino.app"
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "expo-asset"
     ]
   }
 }
