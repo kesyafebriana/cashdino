@@ -10,6 +10,7 @@ import (
 )
 
 type ServiceInterface interface {
+	ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error)
 	EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error)
 	Checkin(ctx context.Context, req model.CheckinRequest) (*model.CheckinResponse, error)
 	GetBanner(ctx context.Context, userID string) (*model.BannerResponse, error)
