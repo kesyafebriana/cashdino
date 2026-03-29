@@ -13,6 +13,7 @@ import (
 )
 
 type Repository interface {
+	ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error)
 	GetUserByID(ctx context.Context, userID string) (*model.User, error)
 	InsertGemHistory(ctx context.Context, userID, source string, amount int, gameName *string) error
 	GetActiveChallenge(ctx context.Context) (*model.WeeklyChallenge, error)
@@ -24,6 +25,9 @@ type Repository interface {
 	GetCheckinDate(ctx context.Context, checkinID string) (time.Time, error)
 	InsertUserDailyCheckin(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error
 	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+
+	// Gem balance
+	GetUserTotalGems(ctx context.Context, userID string) (int, error)
 
 	// Leaderboard queries
 	GetTop99Entries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
@@ -61,6 +65,10 @@ type Service struct {
 
 func New(repo Repository) *Service {
 	return &Service{repo: repo, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (s *Service) ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error) {
+	return s.repo.ListUsers(ctx, limit, usernames)
 }
 
 func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {
@@ -126,6 +134,11 @@ func (s *Service) GetBanner(ctx context.Context, userID string) (*model.BannerRe
 		return nil, err
 	}
 
+	totalGems, err := s.repo.GetUserTotalGems(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("getting user total gems: %w", err)
+	}
+
 	top99, err := s.repo.GetTop99Entries(ctx, challenge.ID)
 	if err != nil {
 		return nil, fmt.Errorf("getting top 99: %w", err)
@@ -134,6 +147,7 @@ func (s *Service) GetBanner(ctx context.Context, userID string) (*model.BannerRe
 	resp := &model.BannerResponse{
 		ChallengeID: challenge.ID,
 		EndTime:     challenge.EndTime,
+		TotalGems:   totalGems,
 		RankDisplay: "99+",
 	}
 
@@ -160,6 +174,14 @@ func (s *Service) GetBanner(ctx context.Context, userID string) (*model.BannerRe
 	if entry != nil {
 		resp.WeeklyGems = entry.WeeklyGems
 		resp.DisplayName = entry.DisplayName
+	}
+	// Compute gap to rank 99 for 99+ users
+	if len(top99) > 0 {
+		last := top99[len(top99)-1]
+		gap := last.WeeklyGems - resp.WeeklyGems + 1
+		if gap > 0 {
+			resp.GapToNext = &gap
+		}
 	}
 	return resp, nil
 }

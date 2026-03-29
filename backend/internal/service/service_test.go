@@ -16,6 +16,7 @@ import (
 // --- Mock Repository ---
 
 type mockRepo struct {
+	listUsers              func(ctx context.Context, limit int, usernames []string) ([]model.User, error)
 	getUserByID            func(ctx context.Context, userID string) (*model.User, error)
 	insertGemHistory       func(ctx context.Context, userID, source string, amount int, gameName *string) error
 	getActiveChallenge     func(ctx context.Context) (*model.WeeklyChallenge, error)
@@ -27,6 +28,7 @@ type mockRepo struct {
 	getCheckinDate         func(ctx context.Context, checkinID string) (time.Time, error)
 	insertUserDailyCheckin func(ctx context.Context, userID, checkinID string, gemsEarned, currentStreak int) error
 	runInTx                func(ctx context.Context, fn func(ctx context.Context) error) error
+	getUserTotalGems        func(ctx context.Context, userID string) (int, error)
 	getTop99Entries         func(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error)
 	getUserEntry            func(ctx context.Context, challengeID, userID string) (*model.LeaderboardEntry, error)
 	getLastCompletedChallenge func(ctx context.Context) (*model.WeeklyChallenge, error)
@@ -48,6 +50,9 @@ type mockRepo struct {
 	getDistributions         func(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
 }
 
+func (m *mockRepo) ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error) {
+	return m.listUsers(ctx, limit, usernames)
+}
 func (m *mockRepo) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
 	return m.getUserByID(ctx, userID)
 }
@@ -83,6 +88,9 @@ func (m *mockRepo) RunInTx(ctx context.Context, fn func(ctx context.Context) err
 		return m.runInTx(ctx, fn)
 	}
 	return fn(ctx)
+}
+func (m *mockRepo) GetUserTotalGems(ctx context.Context, userID string) (int, error) {
+	return m.getUserTotalGems(ctx, userID)
 }
 func (m *mockRepo) GetTop99Entries(ctx context.Context, challengeID string) ([]model.LeaderboardEntry, error) {
 	return m.getTop99Entries(ctx, challengeID)
@@ -142,6 +150,9 @@ var testEndTime = time.Date(2026, 3, 29, 23, 59, 59, 0, time.UTC)
 
 func defaultMockRepo() *mockRepo {
 	return &mockRepo{
+		listUsers: func(_ context.Context, _ int, _ []string) ([]model.User, error) {
+			return []model.User{{ID: "user-1", Username: "james", Email: "james@example.com"}}, nil
+		},
 		getUserByID: func(_ context.Context, _ string) (*model.User, error) {
 			return &model.User{ID: "user-1", Username: "james", Email: "james@example.com"}, nil
 		},
@@ -171,6 +182,9 @@ func defaultMockRepo() *mockRepo {
 		},
 		insertUserDailyCheckin: func(_ context.Context, _, _ string, _, _ int) error {
 			return nil
+		},
+		getUserTotalGems: func(_ context.Context, _ string) (int, error) {
+			return 3886, nil
 		},
 		getTop99Entries: func(_ context.Context, _ string) ([]model.LeaderboardEntry, error) {
 			return nil, nil
@@ -521,7 +535,8 @@ func TestGetBanner_UserNotInTop99_Returns99Plus(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "99+", resp.RankDisplay)
 	assert.Equal(t, 50, resp.WeeklyGems)
-	assert.Nil(t, resp.GapToNext)
+	require.NotNil(t, resp.GapToNext)
+	assert.Equal(t, 951, *resp.GapToNext) // last in top99 has 1000, user has 50 → 1000-50+1
 	assert.Equal(t, "ja****s", resp.DisplayName)
 }
 

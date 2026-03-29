@@ -55,6 +55,38 @@ func (r *Repository) RunInTx(ctx context.Context, fn func(ctx context.Context) e
 	return tx.Commit(ctx)
 }
 
+// ListUsers returns users. If usernames is non-empty, returns those specific users;
+// otherwise returns the first `limit` users ordered by creation time.
+func (r *Repository) ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error) {
+	var rows pgx.Rows
+	var err error
+	if len(usernames) > 0 {
+		rows, err = r.getDB(ctx).Query(ctx,
+			`SELECT id, username, email, created_at FROM users WHERE username = ANY($1) ORDER BY array_position($1, username)`,
+			usernames,
+		)
+	} else {
+		rows, err = r.getDB(ctx).Query(ctx,
+			`SELECT id, username, email, created_at FROM users ORDER BY created_at ASC LIMIT $1`,
+			limit,
+		)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []model.User
+	for rows.Next() {
+		var u model.User
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scanning user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 func (r *Repository) GetUserByID(ctx context.Context, userID string) (*model.User, error) {
 	var u model.User
 	err := r.getDB(ctx).QueryRow(ctx,
@@ -225,6 +257,19 @@ func maskName(name string) string {
 		return string(runes[0:1]) + "****"
 	}
 	return string(runes[0:2]) + "****" + string(runes[len(runes)-1:])
+}
+
+// GetUserTotalGems returns the all-time gem balance for a user: SUM(gem_history.amount).
+func (r *Repository) GetUserTotalGems(ctx context.Context, userID string) (int, error) {
+	var total int
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT COALESCE(SUM(amount), 0) FROM gem_history WHERE user_id = $1`,
+		userID,
+	).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("getting user total gems: %w", err)
+	}
+	return total, nil
 }
 
 // GetTop99Entries returns the top 99 leaderboard entries for a challenge,

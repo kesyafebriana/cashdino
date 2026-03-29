@@ -20,6 +20,7 @@ import (
 // --- Mock Service ---
 
 type mockService struct {
+	listUsers            func(ctx context.Context, limit int, usernames []string) ([]model.User, error)
 	earnGems             func(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error)
 	checkin              func(ctx context.Context, req model.CheckinRequest) (*model.CheckinResponse, error)
 	getBanner            func(ctx context.Context, userID string) (*model.BannerResponse, error)
@@ -32,6 +33,9 @@ type mockService struct {
 	getDistributions     func(ctx context.Context, campaignID string) ([]model.AdminDistributionRow, error)
 }
 
+func (m *mockService) ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error) {
+	return m.listUsers(ctx, limit, usernames)
+}
 func (m *mockService) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {
 	return m.earnGems(ctx, req)
 }
@@ -277,7 +281,7 @@ func TestBannerHandler_ValidRequest_Returns200(t *testing.T) {
 		getBanner: func(_ context.Context, _ string) (*model.BannerResponse, error) {
 			return &model.BannerResponse{
 				ChallengeID: "c-1", EndTime: time.Date(2026, 3, 29, 23, 59, 59, 0, time.UTC),
-				WeeklyGems: 4320, RankDisplay: "#12", GapToNext: &gap, DisplayName: "ja****s",
+				TotalGems: 3886, WeeklyGems: 4320, RankDisplay: "#12", GapToNext: &gap, DisplayName: "ja****s",
 			}, nil
 		},
 	}

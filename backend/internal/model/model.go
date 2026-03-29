@@ -116,6 +116,7 @@ type CheckinResponse struct {
 type BannerResponse struct {
 	ChallengeID string    `json:"challenge_id"`
 	EndTime     time.Time `json:"end_time"`
+	TotalGems   int       `json:"total_gems"`
 	WeeklyGems  int       `json:"weekly_gems"`
 	RankDisplay string    `json:"rank_display"`
 	GapToNext   *int      `json:"gap_to_next"`

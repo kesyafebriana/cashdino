@@ -25,6 +25,7 @@ func New(pool *pgxpool.Pool) *echo.Echo {
 
 	// Routes
 	e.GET("/api/health", h.Health)
+	e.GET("/api/users", h.ListUsers)
 	e.POST("/api/gems/earn", h.EarnGems)
 	e.POST("/api/checkin", h.Checkin)
 	e.GET("/api/challenge/banner", h.GetBanner)
