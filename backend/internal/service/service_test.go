@@ -60,7 +60,14 @@ type mockRepo struct {
 	insertWeeklyChallenge         func(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
 	getRewardTypeByID             func(ctx context.Context, id string) (*model.RewardType, error)
 
+	listChallenges           func(ctx context.Context) ([]model.WeeklyChallenge, error)
+	findChallengeByStartTime func(ctx context.Context, startTime time.Time) (*model.WeeklyChallenge, error)
+	insertChallenge          func(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
+	challengeHasCampaign     func(ctx context.Context, challengeID string) (bool, error)
+	deleteCampaign           func(ctx context.Context, id string) error
+
 	// Email retry methods
+	getFailedDistribution         func(ctx context.Context, id string) (*model.FailedDistribution, error)
 	getFailedDistributions        func(ctx context.Context) ([]model.FailedDistribution, error)
 	updateDistributionDelivered   func(ctx context.Context, id string) error
 	incrementDistributionRetryCount func(ctx context.Context, id string) (int, error)
@@ -186,6 +193,12 @@ func (m *mockRepo) InsertWeeklyChallenge(ctx context.Context, startTime, endTime
 func (m *mockRepo) GetRewardTypeByID(ctx context.Context, id string) (*model.RewardType, error) {
 	return m.getRewardTypeByID(ctx, id)
 }
+func (m *mockRepo) GetFailedDistribution(ctx context.Context, id string) (*model.FailedDistribution, error) {
+	if m.getFailedDistribution != nil {
+		return m.getFailedDistribution(ctx, id)
+	}
+	return nil, nil
+}
 func (m *mockRepo) GetFailedDistributions(ctx context.Context) ([]model.FailedDistribution, error) {
 	return m.getFailedDistributions(ctx)
 }
@@ -194,6 +207,33 @@ func (m *mockRepo) UpdateDistributionDelivered(ctx context.Context, id string) e
 }
 func (m *mockRepo) IncrementDistributionRetryCount(ctx context.Context, id string) (int, error) {
 	return m.incrementDistributionRetryCount(ctx, id)
+}
+func (m *mockRepo) ListChallenges(ctx context.Context) ([]model.WeeklyChallenge, error) {
+	return m.listChallenges(ctx)
+}
+func (m *mockRepo) FindChallengeByStartTime(ctx context.Context, startTime time.Time) (*model.WeeklyChallenge, error) {
+	if m.findChallengeByStartTime != nil {
+		return m.findChallengeByStartTime(ctx, startTime)
+	}
+	return nil, nil
+}
+func (m *mockRepo) InsertChallenge(ctx context.Context, startTime, endTime time.Time, status string) (string, error) {
+	if m.insertChallenge != nil {
+		return m.insertChallenge(ctx, startTime, endTime, status)
+	}
+	return "new-challenge-id", nil
+}
+func (m *mockRepo) ChallengeHasCampaign(ctx context.Context, challengeID string) (bool, error) {
+	if m.challengeHasCampaign != nil {
+		return m.challengeHasCampaign(ctx, challengeID)
+	}
+	return false, nil
+}
+func (m *mockRepo) DeleteCampaign(ctx context.Context, id string) error {
+	if m.deleteCampaign != nil {
+		return m.deleteCampaign(ctx, id)
+	}
+	return nil
 }
 
 // --- Helpers ---

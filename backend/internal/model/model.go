@@ -201,6 +201,7 @@ type LastWeekUserInfo struct {
 
 type CreateCampaignRequest struct {
 	ChallengeID            string                   `json:"challenge_id"`
+	StartDate              string                   `json:"start_date"` // YYYY-MM-DD, Monday only, future — auto-creates challenge
 	Name                   string                   `json:"name"`
 	BannerImage            string                   `json:"banner_image"`
 	RewardTypes            []CreateRewardTypeInput   `json:"reward_types"`
@@ -233,6 +234,7 @@ type AdminCampaignListItem struct {
 	ChallengeEnd     time.Time `json:"challenge_end"`
 	RewardTypesCount int       `json:"reward_types_count"`
 	TotalStock       int       `json:"total_stock"`
+	DistributedCount int       `json:"distributed_count"`
 }
 
 type AdminCampaignDetail struct {

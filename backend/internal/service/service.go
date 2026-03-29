@@ -39,6 +39,13 @@ type Repository interface {
 	GetRewardTypesByIDs(ctx context.Context, ids []string) ([]model.RewardType, error)
 	GetResultRewards(ctx context.Context, challengeID string) (map[string][]model.RewardInfo, error)
 
+	// Admin challenge query
+	ListChallenges(ctx context.Context) ([]model.WeeklyChallenge, error)
+	FindChallengeByStartTime(ctx context.Context, startTime time.Time) (*model.WeeklyChallenge, error)
+	InsertChallenge(ctx context.Context, startTime, endTime time.Time, status string) (string, error)
+	ChallengeHasCampaign(ctx context.Context, challengeID string) (bool, error)
+	DeleteCampaign(ctx context.Context, id string) error
+
 	// Admin campaign methods
 	ListCampaigns(ctx context.Context) ([]model.AdminCampaignListItem, error)
 	GetCampaignByID(ctx context.Context, id string) (*model.RewardCampaignFull, error)
@@ -62,6 +69,7 @@ type Repository interface {
 	GetRewardTypeByID(ctx context.Context, id string) (*model.RewardType, error)
 
 	// Email retry methods
+	GetFailedDistribution(ctx context.Context, id string) (*model.FailedDistribution, error)
 	GetFailedDistributions(ctx context.Context) ([]model.FailedDistribution, error)
 	UpdateDistributionDelivered(ctx context.Context, id string) error
 	IncrementDistributionRetryCount(ctx context.Context, id string) (int, error)
@@ -559,8 +567,8 @@ func (s *Service) GetCampaign(ctx context.Context, id string) (*model.AdminCampa
 
 // validateCampaignRequest validates the shared rules for create/update campaign.
 func validateCampaignRequest(req model.CreateCampaignRequest) error {
-	if req.ChallengeID == "" {
-		return model.ValidationErr("challenge_id is required")
+	if req.ChallengeID == "" && req.StartDate == "" {
+		return model.ValidationErr("challenge_id or start_date is required")
 	}
 	if req.Name == "" {
 		return model.ValidationErr("name is required")
@@ -615,7 +623,52 @@ func validateCampaignRequest(req model.CreateCampaignRequest) error {
 	return nil
 }
 
+func (s *Service) resolveChallengeID(ctx context.Context, req *model.CreateCampaignRequest) error {
+	if req.StartDate == "" {
+		return nil // use existing challenge_id
+	}
+	startTime, err := time.Parse("2006-01-02", req.StartDate)
+	if err != nil {
+		return model.ValidationErr("start_date must be YYYY-MM-DD")
+	}
+	if startTime.Weekday() != time.Monday {
+		return model.ValidationErr("start_date must be a Monday")
+	}
+	startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(), 0, 0, 0, 0, time.UTC)
+	today := time.Date(s.now().Year(), s.now().Month(), s.now().Day(), 0, 0, 0, 0, time.UTC)
+	if !startTime.After(today) {
+		return model.ValidationErr("start_date must be in the future")
+	}
+	endTime := time.Date(startTime.Year(), startTime.Month(), startTime.Day()+6, 23, 59, 59, 0, time.UTC)
+
+	existing, err := s.repo.FindChallengeByStartTime(ctx, startTime)
+	if err != nil {
+		return fmt.Errorf("finding challenge: %w", err)
+	}
+	if existing != nil {
+		// Check if this challenge already has any campaign (any status)
+		hasCampaign, err := s.repo.ChallengeHasCampaign(ctx, existing.ID)
+		if err != nil {
+			return fmt.Errorf("checking existing campaign: %w", err)
+		}
+		if hasCampaign {
+			return model.ValidationErr("a campaign already exists for this week")
+		}
+		req.ChallengeID = existing.ID
+		return nil
+	}
+	id, err := s.repo.InsertChallenge(ctx, startTime, endTime, "scheduled")
+	if err != nil {
+		return fmt.Errorf("creating challenge: %w", err)
+	}
+	req.ChallengeID = id
+	return nil
+}
+
 func (s *Service) CreateCampaign(ctx context.Context, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error) {
+	if err := s.resolveChallengeID(ctx, &req); err != nil {
+		return nil, err
+	}
 	if err := validateCampaignRequest(req); err != nil {
 		return nil, err
 	}
@@ -627,6 +680,7 @@ func (s *Service) CreateCampaign(ctx context.Context, req model.CreateCampaignRe
 			ChallengeID:             req.ChallengeID,
 			Name:                    req.Name,
 			BannerImage:             req.BannerImage,
+			Rules:                   json.RawMessage("[]"),
 			Status:                  "draft",
 			NonGemClaimEmailSubject: req.NonGemClaimEmailSubject,
 			NonGemClaimEmailBody:    req.NonGemClaimEmailBody,
@@ -789,4 +843,56 @@ func (s *Service) GetDistributions(ctx context.Context, campaignID string) ([]mo
 		return nil, fmt.Errorf("getting distributions: %w", err)
 	}
 	return rows, nil
+}
+
+func (s *Service) MarkDistributionDelivered(ctx context.Context, id string) error {
+	if id == "" {
+		return model.ValidationErr("distribution id is required")
+	}
+	return s.repo.UpdateDistributionDelivered(ctx, id)
+}
+
+func (s *Service) RetrySingleDistribution(ctx context.Context, id string) error {
+	if id == "" {
+		return model.ValidationErr("distribution id is required")
+	}
+	dist, err := s.repo.GetFailedDistribution(ctx, id)
+	if err != nil {
+		return fmt.Errorf("getting failed distribution: %w", err)
+	}
+	if dist == nil {
+		return model.ValidationErr("distribution not found or not in failed state")
+	}
+
+	data := buildTemplateDataFromDist(*dist)
+	subject := s.email.RenderTemplate(dist.EmailSubject, data)
+	body := s.email.RenderTemplate(dist.EmailBody, data)
+
+	emailErr := s.email.SendEmail(dist.Email, subject, body)
+	if emailErr != nil {
+		_, _ = s.repo.IncrementDistributionRetryCount(ctx, id)
+		return fmt.Errorf("email send failed: %w", emailErr)
+	}
+	return s.repo.UpdateDistributionDelivered(ctx, id)
+}
+
+func (s *Service) DeleteCampaign(ctx context.Context, id string) error {
+	if id == "" {
+		return model.ValidationErr("campaign id is required")
+	}
+	campaign, err := s.repo.GetCampaignByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("getting campaign: %w", err)
+	}
+	if campaign == nil {
+		return model.ErrNotFound
+	}
+	if campaign.Status != "draft" {
+		return model.ValidationErr("only draft campaigns can be deleted")
+	}
+	return s.repo.DeleteCampaign(ctx, id)
+}
+
+func (s *Service) ListChallenges(ctx context.Context) ([]model.WeeklyChallenge, error) {
+	return s.repo.ListChallenges(ctx)
 }

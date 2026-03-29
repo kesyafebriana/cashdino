@@ -9,12 +9,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 
 	cronpkg "github.com/kesyafebriana/cashdino/backend/internal/cron"
 	"github.com/kesyafebriana/cashdino/backend/internal/server"
 )
 
 func main() {
+	// Load .env file if present (no error if missing)
+	_ = godotenv.Load()
+
 	// Database connection
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {

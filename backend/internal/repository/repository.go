@@ -450,6 +450,72 @@ func (r *Repository) GetResultRewards(ctx context.Context, challengeID string) (
 	return result, rows.Err()
 }
 
+func (r *Repository) FindChallengeByStartTime(ctx context.Context, startTime time.Time) (*model.WeeklyChallenge, error) {
+	var c model.WeeklyChallenge
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT id, start_time, end_time, status FROM weekly_challenges WHERE start_time = $1`, startTime,
+	).Scan(&c.ID, &c.StartTime, &c.EndTime, &c.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("finding challenge by start time: %w", err)
+	}
+	return &c, nil
+}
+
+func (r *Repository) InsertChallenge(ctx context.Context, startTime, endTime time.Time, status string) (string, error) {
+	var id string
+	err := r.getDB(ctx).QueryRow(ctx,
+		`INSERT INTO weekly_challenges (start_time, end_time, status) VALUES ($1, $2, $3) RETURNING id`,
+		startTime, endTime, status,
+	).Scan(&id)
+	if err != nil {
+		return "", fmt.Errorf("inserting challenge: %w", err)
+	}
+	return id, nil
+}
+
+func (r *Repository) DeleteCampaign(ctx context.Context, id string) error {
+	_, err := r.getDB(ctx).Exec(ctx, `DELETE FROM reward_campaigns WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("deleting campaign: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) ChallengeHasCampaign(ctx context.Context, challengeID string) (bool, error) {
+	var exists bool
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM reward_campaigns WHERE challenge_id = $1)`, challengeID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking campaign existence: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *Repository) ListChallenges(ctx context.Context) ([]model.WeeklyChallenge, error) {
+	rows, err := r.getDB(ctx).Query(ctx,
+		`SELECT id, start_time, end_time, status FROM weekly_challenges ORDER BY start_time DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("querying challenges: %w", err)
+	}
+	defer rows.Close()
+	var items []model.WeeklyChallenge
+	for rows.Next() {
+		var c model.WeeklyChallenge
+		if err := rows.Scan(&c.ID, &c.StartTime, &c.EndTime, &c.Status); err != nil {
+			return nil, fmt.Errorf("scanning challenge: %w", err)
+		}
+		items = append(items, c)
+	}
+	if items == nil {
+		items = []model.WeeklyChallenge{}
+	}
+	return items, rows.Err()
+}
+
 // =====================================================================
 // Admin campaign repository methods
 // =====================================================================
@@ -459,11 +525,13 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]model.AdminCampaignLi
 	rows, err := r.getDB(ctx).Query(ctx,
 		`SELECT rc.id, rc.challenge_id, rc.name, rc.banner_image, rc.status,
 		        wc.start_time, wc.end_time,
-		        COUNT(rt.id) AS reward_types_count,
-		        COALESCE(SUM(rt.stock), 0) AS total_stock
+		        COUNT(DISTINCT rt.id) AS reward_types_count,
+		        COALESCE(SUM(DISTINCT rt.stock), 0) AS total_stock,
+		        COUNT(DISTINCT rd.id) FILTER (WHERE rd.status = 'delivered') AS distributed_count
 		 FROM reward_campaigns rc
 		 JOIN weekly_challenges wc ON rc.challenge_id = wc.id
 		 LEFT JOIN reward_types rt ON rt.campaign_id = rc.id
+		 LEFT JOIN reward_distributions rd ON rd.campaign_id = rc.id
 		 GROUP BY rc.id, rc.challenge_id, rc.name, rc.banner_image, rc.status, wc.start_time, wc.end_time
 		 ORDER BY wc.start_time DESC`,
 	)
@@ -476,7 +544,7 @@ func (r *Repository) ListCampaigns(ctx context.Context) ([]model.AdminCampaignLi
 	for rows.Next() {
 		var item model.AdminCampaignListItem
 		if err := rows.Scan(&item.ID, &item.ChallengeID, &item.Name, &item.BannerImage, &item.Status,
-			&item.ChallengeStart, &item.ChallengeEnd, &item.RewardTypesCount, &item.TotalStock); err != nil {
+			&item.ChallengeStart, &item.ChallengeEnd, &item.RewardTypesCount, &item.TotalStock, &item.DistributedCount); err != nil {
 			return nil, fmt.Errorf("scanning campaign list item: %w", err)
 		}
 		items = append(items, item)

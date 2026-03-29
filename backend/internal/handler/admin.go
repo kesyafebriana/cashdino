@@ -7,6 +7,14 @@ import (
 	"github.com/kesyafebriana/cashdino/backend/internal/model"
 )
 
+func (h *Handler) ListChallenges(c echo.Context) error {
+	items, err := h.svc.ListChallenges(c.Request().Context())
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, items)
+}
+
 func (h *Handler) ListCampaigns(c echo.Context) error {
 	items, err := h.svc.ListCampaigns(c.Request().Context())
 	if err != nil {
@@ -58,6 +66,30 @@ func (h *Handler) GetDistributions(c echo.Context) error {
 		return mapServiceError(c, err)
 	}
 	return c.JSON(http.StatusOK, rows)
+}
+
+func (h *Handler) DeleteCampaign(c echo.Context) error {
+	id := c.Param("id")
+	if err := h.svc.DeleteCampaign(c.Request().Context(), id); err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) MarkDistributionDelivered(c echo.Context) error {
+	id := c.Param("id")
+	if err := h.svc.MarkDistributionDelivered(c.Request().Context(), id); err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "delivered"})
+}
+
+func (h *Handler) RetryDistribution(c echo.Context) error {
+	id := c.Param("id")
+	if err := h.svc.RetrySingleDistribution(c.Request().Context(), id); err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "delivered"})
 }
 
 func (h *Handler) ResetWeek(c echo.Context) error {

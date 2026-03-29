@@ -71,5 +71,8 @@ func (es *EmailService) RenderTemplate(template string, data map[string]string) 
 	}
 	s = strings.ReplaceAll(s, "{{reward_image}}", imageHTML)
 
+	// Convert newlines to <br> for HTML rendering
+	s = strings.ReplaceAll(s, "\n", "<br>\n")
+
 	return s
 }

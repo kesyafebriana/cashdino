@@ -16,7 +16,11 @@ type ServiceInterface interface {
 	GetBanner(ctx context.Context, userID string) (*model.BannerResponse, error)
 	GetCurrentLeaderboard(ctx context.Context, userID string) (*model.CurrentLeaderboardResponse, error)
 	GetLastWeekLeaderboard(ctx context.Context, userID string) (*model.LastWeekResponse, error)
+	ListChallenges(ctx context.Context) ([]model.WeeklyChallenge, error)
 	ListCampaigns(ctx context.Context) ([]model.AdminCampaignListItem, error)
+	DeleteCampaign(ctx context.Context, id string) error
+	MarkDistributionDelivered(ctx context.Context, id string) error
+	RetrySingleDistribution(ctx context.Context, id string) error
 	GetCampaign(ctx context.Context, id string) (*model.AdminCampaignDetail, error)
 	CreateCampaign(ctx context.Context, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)
 	UpdateCampaign(ctx context.Context, id string, req model.CreateCampaignRequest) (*model.AdminCampaignDetail, error)

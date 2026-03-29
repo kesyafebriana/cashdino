@@ -51,11 +51,15 @@ func New(svc *service.Service) *echo.Echo {
 	e.GET("/api/leaderboard/last-week", h.GetLastWeekLeaderboard)
 
 	// Admin routes
+	e.GET("/api/admin/challenges", h.ListChallenges)
 	e.GET("/api/admin/campaigns", h.ListCampaigns)
 	e.GET("/api/admin/campaigns/:id", h.GetCampaign)
 	e.POST("/api/admin/campaigns", h.CreateCampaign)
 	e.PUT("/api/admin/campaigns/:id", h.UpdateCampaign)
+	e.DELETE("/api/admin/campaigns/:id", h.DeleteCampaign)
 	e.GET("/api/admin/campaigns/:id/distributions", h.GetDistributions)
+	e.POST("/api/admin/distributions/:id/deliver", h.MarkDistributionDelivered)
+	e.POST("/api/admin/distributions/:id/retry", h.RetryDistribution)
 	e.POST("/api/admin/reset-week", h.ResetWeek)
 
 	return e

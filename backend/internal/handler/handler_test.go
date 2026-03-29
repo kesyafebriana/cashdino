@@ -52,6 +52,18 @@ func (m *mockService) GetCurrentLeaderboard(ctx context.Context, userID string) 
 func (m *mockService) GetLastWeekLeaderboard(ctx context.Context, userID string) (*model.LastWeekResponse, error) {
 	return m.getLastWeekLeaderboard(ctx, userID)
 }
+func (m *mockService) ListChallenges(ctx context.Context) ([]model.WeeklyChallenge, error) {
+	return nil, nil
+}
+func (m *mockService) DeleteCampaign(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockService) MarkDistributionDelivered(ctx context.Context, id string) error {
+	return nil
+}
+func (m *mockService) RetrySingleDistribution(ctx context.Context, id string) error {
+	return nil
+}
 func (m *mockService) ListCampaigns(ctx context.Context) ([]model.AdminCampaignListItem, error) {
 	return m.listCampaigns(ctx)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
 var usernames = []string{
@@ -54,6 +55,8 @@ type lastWeekUser struct {
 }
 
 func main() {
+	_ = godotenv.Load()
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL is required")
@@ -401,19 +404,32 @@ func main() {
 		}
 
 		for _, rtID := range typeIDs {
-			var emailSentAt *time.Time
-			if rtID == rewardTypeIDs["$10 Amazon Gift Card"] {
-				t := deliveredAt
-				emailSentAt = &t
-			}
+			// Make rank #3's gift card distribution fail (simulate failed email)
+			isFailed := r == 3 && rtID == rewardTypeIDs["$10 Amazon Gift Card"]
 
-			_, err := tx.Exec(ctx,
-				`INSERT INTO reward_distributions (campaign_id, user_id, reward_type_id, status, delivered_at, email_sent_at)
-				 VALUES ($1, $2, $3, 'delivered', $4, $5)`,
-				campaignID, userIDs[lwu.index], rtID, deliveredAt, emailSentAt,
-			)
-			if err != nil {
-				log.Fatalf("failed to insert reward distribution: %v", err)
+			if isFailed {
+				_, err := tx.Exec(ctx,
+					`INSERT INTO reward_distributions (campaign_id, user_id, reward_type_id, status, retry_count)
+					 VALUES ($1, $2, $3, 'failed', 3)`,
+					campaignID, userIDs[lwu.index], rtID,
+				)
+				if err != nil {
+					log.Fatalf("failed to insert failed reward distribution: %v", err)
+				}
+			} else {
+				var emailSentAt *time.Time
+				if rtID == rewardTypeIDs["$10 Amazon Gift Card"] {
+					t := deliveredAt
+					emailSentAt = &t
+				}
+				_, err := tx.Exec(ctx,
+					`INSERT INTO reward_distributions (campaign_id, user_id, reward_type_id, status, delivered_at, email_sent_at)
+					 VALUES ($1, $2, $3, 'delivered', $4, $5)`,
+					campaignID, userIDs[lwu.index], rtID, deliveredAt, emailSentAt,
+				)
+				if err != nil {
+					log.Fatalf("failed to insert reward distribution: %v", err)
+				}
 			}
 			distributionCount++
 		}

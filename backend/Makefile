@@ -1,5 +1,8 @@
 .PHONY: run build seed migrate-up migrate-down migrate-create test lint
 
+include .env
+export
+
 run:
 	go run cmd/server/main.go
 

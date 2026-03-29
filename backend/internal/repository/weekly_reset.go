@@ -135,6 +135,35 @@ func (r *Repository) GetRewardTypeByID(ctx context.Context, id string) (*model.R
 	return &rt, nil
 }
 
+// GetFailedDistribution returns a single failed distribution by ID (no retry_count limit).
+func (r *Repository) GetFailedDistribution(ctx context.Context, id string) (*model.FailedDistribution, error) {
+	var d model.FailedDistribution
+	err := r.getDB(ctx).QueryRow(ctx,
+		`SELECT rd.id, rd.campaign_id, rd.user_id, u.username, u.email,
+		        rd.reward_type_id, rt.name, rt.value, rt.image,
+		        wcr.final_rank,
+		        rc.non_gem_claim_email_subject, rc.non_gem_claim_email_body,
+		        rd.retry_count
+		 FROM reward_distributions rd
+		 JOIN users u ON rd.user_id = u.id
+		 JOIN reward_types rt ON rd.reward_type_id = rt.id
+		 JOIN reward_campaigns rc ON rd.campaign_id = rc.id
+		 JOIN weekly_challenge_results wcr ON wcr.challenge_id = rc.challenge_id AND wcr.user_id = rd.user_id
+		 WHERE rd.id = $1 AND rd.status = 'failed'`, id,
+	).Scan(&d.ID, &d.CampaignID, &d.UserID, &d.Username, &d.Email,
+		&d.RewardTypeID, &d.RewardTypeName, &d.RewardTypeValue, &d.RewardTypeImage,
+		&d.FinalRank,
+		&d.EmailSubject, &d.EmailBody,
+		&d.RetryCount)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting failed distribution: %w", err)
+	}
+	return &d, nil
+}
+
 // GetFailedDistributions returns all failed distributions joined with campaign, user, and reward_type info.
 func (r *Repository) GetFailedDistributions(ctx context.Context) ([]model.FailedDistribution, error) {
 	rows, err := r.getDB(ctx).Query(ctx,
