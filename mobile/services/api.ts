@@ -79,6 +79,106 @@ export async function checkin(userId: string): Promise<CheckinResponse> {
   return res.json();
 }
 
+// --- Leaderboard types ---
+
+export interface ChallengeInfo {
+  id: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+}
+
+export interface CurrentLeaderboardRow {
+  rank: number;
+  display_name: string;
+  weekly_gems: number;
+}
+
+export interface CurrentUserInfo {
+  rank: number | null;
+  rank_display: string;
+  weekly_gems: number;
+  gap_to_next: number | null;
+  display_name: string;
+}
+
+export interface RewardInfo {
+  name: string;
+  image: string | null;
+  value: number;
+  type: string;
+}
+
+export interface RewardsSummaryRow {
+  rank_from: number;
+  rank_to: number;
+  rewards: RewardInfo[];
+}
+
+export interface CampaignSummary {
+  banner_image: string;
+  rewards_summary: RewardsSummaryRow[];
+}
+
+export interface CurrentLeaderboardResponse {
+  challenge: ChallengeInfo;
+  leaderboard: CurrentLeaderboardRow[];
+  current_user: CurrentUserInfo;
+  campaign: CampaignSummary | null;
+}
+
+export async function fetchCurrentLeaderboard(
+  userId: string
+): Promise<CurrentLeaderboardResponse> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/leaderboard/current?user_id=${userId}`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch leaderboard: ${res.status}`);
+  }
+  return res.json();
+}
+
+// --- Last week leaderboard types ---
+
+export interface LastWeekChallengeInfo {
+  id: string;
+  start_time: string;
+  end_time: string;
+}
+
+export interface LastWeekRow {
+  rank: number;
+  display_name: string;
+  final_gems: number;
+  rewards: RewardInfo[];
+}
+
+export interface LastWeekUserInfo {
+  rank: number | null;
+  rank_display: string;
+  final_gems: number;
+  rewards: RewardInfo[];
+}
+
+export interface LastWeekResponse {
+  challenge: LastWeekChallengeInfo | null;
+  leaderboard: LastWeekRow[];
+  current_user: LastWeekUserInfo | null;
+}
+
+export async function fetchLastWeekLeaderboard(
+  userId: string
+): Promise<LastWeekResponse> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/leaderboard/last-week?user_id=${userId}`
+  );
+  if (!res.ok) {
+    throw new Error(`Failed to fetch last week leaderboard: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchBanner(userId: string): Promise<BannerResponse> {
   const res = await fetch(
     `${API_BASE_URL}/api/challenge/banner?user_id=${userId}`

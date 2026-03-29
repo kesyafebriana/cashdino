@@ -17,6 +17,8 @@ function AppContent() {
 
   const totalGems = bannerLoading ? null : (banner?.total_gems ?? 0);
 
+  const hideChrome = pathname.startsWith("/leaderboard");
+
   const activeTab: TabKey =
     pathname === "/profile"
       ? "profile"
@@ -38,9 +40,11 @@ function AppContent() {
     <View className="flex-1 bg-white">
       <StatusBar style="dark" />
 
-      <View style={{ paddingTop: insets.top }}>
-        <Navbar totalGems={totalGems} />
-      </View>
+      {!hideChrome && (
+        <View style={{ paddingTop: insets.top }}>
+          <Navbar totalGems={totalGems} />
+        </View>
+      )}
 
       <View className="flex-1">
         <Slot />
