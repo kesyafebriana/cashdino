@@ -23,6 +23,18 @@ var usernames = []string{
 	"riley", "connor", "nora", "eli", "stella",
 	"aaron", "lucy", "landon", "emilia", "adrian",
 	"maya", "miles", "aria", "leo", "ellie",
+	// 53 additional users (total: 103)
+	"ethan", "victoria", "logan", "hannah", "mason",
+	"addison", "jacob", "aurora", "liam", "savannah",
+	"noah", "brooklyn", "jack", "leah", "luke",
+	"natalie", "gabriel", "hazel", "julian", "violet",
+	"carter", "eleanor", "jayden", "claire", "dylan",
+	"skylar", "isaac", "bella", "andrew", "alice",
+	"thomas", "madelyn", "joshua", "audrey", "christopher",
+	"paisley", "theodore", "sadie", "david", "ruby",
+	"joseph", "eva", "charles", "naomi", "wyatt",
+	"quinn", "max", "ivy", "finn", "lyla",
+	"oscar", "freya", "felix",
 }
 
 var gameNames = []string{
@@ -68,7 +80,7 @@ func main() {
 	defer tx.Rollback(ctx)
 
 	// -----------------------------------------------------------
-	// 1. Create 50 users
+	// 1. Create 103 users
 	// -----------------------------------------------------------
 	log.Println("creating users...")
 	userIDs := make([]string, len(usernames))
@@ -157,8 +169,7 @@ func main() {
 	// -----------------------------------------------------------
 	log.Println("seeding active week gem_history and leaderboard_entries...")
 
-	// Distribute gems: top users get more, bottom users get less
-	// Sort by target gems descending to create a realistic curve
+	totalUsers := len(userIDs)
 	for i, userID := range userIDs {
 		var targetGems int
 		switch {
@@ -168,10 +179,19 @@ func main() {
 			targetGems = 5000 + rand.Intn(5001)
 		case i < 25: // middle 11-25: 3K-5K
 			targetGems = 3000 + rand.Intn(2001)
-		case i < 40: // lower-middle 26-40: 500-3K
+		case i < 50: // lower-middle 26-50: 500-3K
 			targetGems = 500 + rand.Intn(2501)
-		default: // bottom 41-50: 100-500
+		case i < 75: // low 51-75: 100-500
 			targetGems = 100 + rand.Intn(401)
+		case i < 99: // very low 76-99: 10-100
+			targetGems = 10 + rand.Intn(91)
+		default: // zero gems 100-103: 0 gems (no activity)
+			targetGems = 0
+		}
+
+		if targetGems == 0 {
+			// No gem_history or leaderboard entry for zero-gem users
+			continue
 		}
 
 		// Scatter gems across multiple gem_history records
@@ -228,7 +248,7 @@ func main() {
 			log.Fatalf("failed to insert leaderboard entry: %v", err)
 		}
 	}
-	log.Println("active week seeded")
+	log.Printf("active week seeded (%d users with gems, %d with 0 gems)", totalUsers-4, 4)
 
 	// -----------------------------------------------------------
 	// 6. Seed last week: gem_history + weekly_challenge_results
@@ -245,12 +265,20 @@ func main() {
 			gems = 6000 + rand.Intn(5001)
 		case i < 25:
 			gems = 2500 + rand.Intn(2501)
-		case i < 40:
+		case i < 50:
 			gems = 400 + rand.Intn(2101)
+		case i < 75:
+			gems = 50 + rand.Intn(351)
+		case i < 99:
+			gems = 5 + rand.Intn(46)
 		default:
-			gems = 80 + rand.Intn(321)
+			gems = 0
 		}
 		lastWeekUsers[i] = lastWeekUser{index: i, gems: gems}
+
+		if gems == 0 {
+			continue
+		}
 
 		// Insert gem_history records for last week too
 		source := "gameplay"
@@ -268,10 +296,13 @@ func main() {
 		}
 	}
 
-	// Sort by gems descending for ranking
+	// Sort by gems descending for ranking (only include users with gems > 0)
 	sortLastWeek(lastWeekUsers)
 
 	for rank, lwu := range lastWeekUsers {
+		if lwu.gems == 0 {
+			break // sorted descending, so all remaining are 0
+		}
 		_, err := tx.Exec(ctx,
 			`INSERT INTO weekly_challenge_results (challenge_id, user_id, final_rank, final_gems, display_name)
 			 VALUES ($1, $2, $3, $4, $5)`,
@@ -423,12 +454,17 @@ func main() {
 	// Use only checkins from the last 7 days (this week's daily checkins)
 	recentCheckins := checkinIDs[7:] // last 7 of 14
 	for i, userID := range userIDs {
-		// Top users check in more consistently
-		maxCheckins := 3
+		// Top users check in more consistently, zero-gem users don't check in
+		if i >= 99 {
+			continue // zero-gem users skip check-ins
+		}
+		maxCheckins := 2
 		if i < 10 {
 			maxCheckins = 7
 		} else if i < 25 {
 			maxCheckins = 5
+		} else if i < 50 {
+			maxCheckins = 3
 		}
 		streak := 0
 		for j := 0; j < len(recentCheckins) && j < maxCheckins; j++ {
@@ -484,7 +520,7 @@ func maskName(name string) string {
 	return string(runes[0:2]) + "****" + string(runes[len(runes)-1:])
 }
 
-// sortLastWeek sorts by gems descending (simple insertion sort for 50 items)
+// sortLastWeek sorts by gems descending (simple insertion sort)
 func sortLastWeek(users []lastWeekUser) {
 	for i := 1; i < len(users); i++ {
 		key := users[i]
