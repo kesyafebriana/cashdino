@@ -343,9 +343,8 @@ func main() {
 		stock int
 	}{
 		{"10K Gems", "gems", "10000", nil, 1},
-		{"2K Gems", "gems", "2000", nil, 4},
-		{"Gift Card A", "gift_card", "10", strPtr("https://picsum.photos/100"), 5},
-		{"Gift Card B", "gift_card", "5", strPtr("https://picsum.photos/100"), 5},
+		{"2K Gems", "gems", "2000", nil, 2},
+		{"$10 Amazon Gift Card", "gift_card", "10", strPtr("https://picsum.photos/100"), 3},
 	}
 
 	for _, rd := range rewardDefs {
@@ -363,9 +362,8 @@ func main() {
 
 	// Build rules JSONB and update campaign
 	rules := []rewardRule{
-		{RankFrom: 1, RankTo: 1, RewardTypeIDs: []string{rewardTypeIDs["10K Gems"], rewardTypeIDs["Gift Card A"]}},
-		{RankFrom: 2, RankTo: 5, RewardTypeIDs: []string{rewardTypeIDs["2K Gems"], rewardTypeIDs["Gift Card A"]}},
-		{RankFrom: 6, RankTo: 10, RewardTypeIDs: []string{rewardTypeIDs["Gift Card B"]}},
+		{RankFrom: 1, RankTo: 1, RewardTypeIDs: []string{rewardTypeIDs["10K Gems"], rewardTypeIDs["$10 Amazon Gift Card"]}},
+		{RankFrom: 2, RankTo: 3, RewardTypeIDs: []string{rewardTypeIDs["2K Gems"], rewardTypeIDs["$10 Amazon Gift Card"]}},
 	}
 	rulesJSON, err := json.Marshal(rules)
 	if err != nil {
@@ -395,19 +393,16 @@ func main() {
 
 		switch {
 		case r == 1:
-			typeIDs = []string{rewardTypeIDs["10K Gems"], rewardTypeIDs["Gift Card A"]}
-		case r >= 2 && r <= 5:
-			typeIDs = []string{rewardTypeIDs["2K Gems"], rewardTypeIDs["Gift Card A"]}
-		case r >= 6 && r <= 10:
-			typeIDs = []string{rewardTypeIDs["Gift Card B"]}
+			typeIDs = []string{rewardTypeIDs["10K Gems"], rewardTypeIDs["$10 Amazon Gift Card"]}
+		case r >= 2 && r <= 3:
+			typeIDs = []string{rewardTypeIDs["2K Gems"], rewardTypeIDs["$10 Amazon Gift Card"]}
 		default:
 			continue
 		}
 
 		for _, rtID := range typeIDs {
 			var emailSentAt *time.Time
-			// Non-gem rewards get email_sent_at
-			if rtID == rewardTypeIDs["Gift Card A"] || rtID == rewardTypeIDs["Gift Card B"] {
+			if rtID == rewardTypeIDs["$10 Amazon Gift Card"] {
 				t := deliveredAt
 				emailSentAt = &t
 			}
@@ -433,7 +428,7 @@ func main() {
 			if err != nil {
 				log.Fatalf("failed to insert gem reward history: %v", err)
 			}
-		} else if r >= 2 && r <= 5 {
+		} else if r >= 2 && r <= 3 {
 			_, err := tx.Exec(ctx,
 				`INSERT INTO gem_history (user_id, source, amount, created_at)
 				 VALUES ($1, 'reward', 2000, $2)`,
@@ -447,7 +442,70 @@ func main() {
 	log.Printf("created %d reward distributions", distributionCount)
 
 	// -----------------------------------------------------------
-	// 9. Create some user_daily_checkins for active week
+	// 9. Create reward campaign for this week (active challenge)
+	// -----------------------------------------------------------
+	log.Println("creating this week's reward campaign...")
+
+	var thisWeekCampaignID string
+	err = tx.QueryRow(ctx,
+		`INSERT INTO reward_campaigns (challenge_id, name, banner_image, rules, non_gem_claim_email_subject, non_gem_claim_email_body, status)
+		 VALUES ($1, $2, $3, '[]', $4, $5, 'active') RETURNING id`,
+		activeChallengeID,
+		"Week 13 Rewards",
+		"https://picsum.photos/600/200",
+		"Congratulations! You won a reward from CashDino!",
+		"Hi {{username}},\n\nCongratulations on reaching rank #{{rank}} in this week's challenge!\n\nYou've won: {{reward_type}} ({{reward_value}})\n\nClaim your reward by replying to this email.\n\nBest,\nCashDino Team",
+	).Scan(&thisWeekCampaignID)
+	if err != nil {
+		log.Fatalf("failed to create this week reward campaign: %v", err)
+	}
+
+	thisWeekRewardTypeIDs := make(map[string]string)
+	thisWeekRewardDefs := []struct {
+		name  string
+		typ   string
+		value string
+		image *string
+		stock int
+	}{
+		{"10K Gems", "gems", "10000", nil, 1},
+		{"2K Gems", "gems", "2000", nil, 2},
+		{"$10 Amazon Gift Card", "gift_card", "10", strPtr("https://picsum.photos/100"), 3},
+	}
+
+	for _, rd := range thisWeekRewardDefs {
+		var id string
+		err := tx.QueryRow(ctx,
+			`INSERT INTO reward_types (campaign_id, name, type, value, image, stock)
+			 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+			thisWeekCampaignID, rd.name, rd.typ, rd.value, rd.image, rd.stock,
+		).Scan(&id)
+		if err != nil {
+			log.Fatalf("failed to create this week reward type %s: %v", rd.name, err)
+		}
+		thisWeekRewardTypeIDs[rd.name] = id
+	}
+
+	thisWeekRules := []rewardRule{
+		{RankFrom: 1, RankTo: 1, RewardTypeIDs: []string{thisWeekRewardTypeIDs["10K Gems"], thisWeekRewardTypeIDs["$10 Amazon Gift Card"]}},
+		{RankFrom: 2, RankTo: 3, RewardTypeIDs: []string{thisWeekRewardTypeIDs["2K Gems"], thisWeekRewardTypeIDs["$10 Amazon Gift Card"]}},
+	}
+	thisWeekRulesJSON, err := json.Marshal(thisWeekRules)
+	if err != nil {
+		log.Fatalf("failed to marshal this week rules: %v", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE reward_campaigns SET rules = $1 WHERE id = $2`,
+		thisWeekRulesJSON, thisWeekCampaignID,
+	)
+	if err != nil {
+		log.Fatalf("failed to update this week campaign rules: %v", err)
+	}
+	log.Printf("created this week campaign %s with %d reward types", thisWeekCampaignID, len(thisWeekRewardDefs))
+
+	// -----------------------------------------------------------
+	// 10. Create some user_daily_checkins for active week
 	// -----------------------------------------------------------
 	log.Println("creating user daily checkin records...")
 	checkinCount := 0

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ScrollView, View, Alert } from "react-native";
+import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { CheckInBanner } from "@/components/home/CheckInBanner";
@@ -41,6 +42,7 @@ function formatTimeLeft(endTime: string): string {
 }
 
 export default function HomeScreen() {
+  const router = useRouter();
   const { currentUser, banner, bannerLoading, rankChange, refreshBanner } =
     useUser();
 
@@ -133,6 +135,7 @@ export default function HomeScreen() {
           }
           nextRank={!isNotRanked ? nextRank : undefined}
           notRanked={isNotRanked}
+          onViewLeaderboard={() => router.push("/leaderboard")}
         />
       ) : (
         <View className="mx-4 mb-5" />

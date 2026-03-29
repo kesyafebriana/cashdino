@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { View, Text, Modal, Pressable } from "react-native";
+import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { StepIntro } from "./StepIntro";
@@ -12,6 +13,7 @@ const STORAGE_KEY_PREFIX = "onboarding_shown_version";
 const TOTAL_STEPS = 3;
 
 export function OnboardingModal() {
+  const router = useRouter();
   const { currentUser } = useUser();
   const [visible, setVisible] = useState(false);
   const [step, setStep] = useState(0);
@@ -43,6 +45,7 @@ export function OnboardingModal() {
       setStep(step + 1);
     } else {
       dismiss();
+      router.push("/leaderboard");
     }
   };
 
