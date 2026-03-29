@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Navbar } from "@/components/home/Navbar";
 import { BottomNavbar, type TabKey } from "@/components/home/BottomNavbar";
+import { OnboardingModal } from "@/components/onboarding/OnboardingModal";
 import { UserProvider, useUser } from "@/contexts/UserContext";
 
 function AppContent() {
@@ -46,6 +47,8 @@ function AppContent() {
       </View>
 
       <BottomNavbar activeTab={activeTab} onTabPress={handleTabPress} />
+
+      <OnboardingModal />
     </View>
   );
 }
