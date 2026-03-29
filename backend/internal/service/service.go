@@ -88,6 +88,10 @@ func (s *Service) ListUsers(ctx context.Context, limit int, usernames []string) 
 	return s.repo.ListUsers(ctx, limit, usernames)
 }
 
+func (s *Service) ListUsers(ctx context.Context, limit int, usernames []string) ([]model.User, error) {
+	return s.repo.ListUsers(ctx, limit, usernames)
+}
+
 func (s *Service) EarnGems(ctx context.Context, req model.EarnGemsRequest) (*model.EarnGemsResponse, error) {
 	if req.UserID == "" {
 		return nil, model.ValidationErr("user_id is required")
